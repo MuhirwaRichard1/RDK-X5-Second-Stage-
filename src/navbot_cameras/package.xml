@@ -1,0 +1,16 @@
+<?xml version="1.0"?>
+<?xml-model href="http://download.ros.org/schema/package_format3.xsd" schematypens="http://www.w3.org/2001/XMLSchema"?>
+<package format="3">
+  <name>navbot_cameras</name>
+  <version>1.0.0</version>
+  <description>3-camera USB bring-up (front + L/R wide-angle) for the RDK X5 Tri-Cam NavBot; wraps hobot_usb_cam.</description>
+  <maintainer email="muhirwaricardo12@gmail.com">Ricardo Muhirwa</maintainer>
+  <license>MIT</license>
+
+  <exec_depend>hobot_usb_cam</exec_depend>
+  <exec_depend>hobot_shm</exec_depend>
+
+  <export>
+    <build_type>ament_python</build_type>
+  </export>
+</package>

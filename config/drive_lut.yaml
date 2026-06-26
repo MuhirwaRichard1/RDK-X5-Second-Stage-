@@ -1,0 +1,16 @@
+# Open-loop duty-cycle -> velocity lookup (encoderless drive calibration)
+# Measure on the actual demo surface: command a duty, time the robot over 1.0 m, repeat.
+# motor_controller interpolates between rows. See ROADMAP W2 exit criteria.
+surface: "lab_tile"
+date: "2026-06-26"
+# per-motor trim corrects unequal motors (Risk R3) so a straight command drives straight
+trim:
+  left: 1.00
+  right: 0.96
+lut:           # duty (0-1) : measured linear velocity (m/s)
+  - {duty: 0.30, v: 0.00}   # below stall
+  - {duty: 0.40, v: 0.12}
+  - {duty: 0.55, v: 0.22}
+  - {duty: 0.70, v: 0.33}
+  - {duty: 0.85, v: 0.41}
+max_cmd_v: 0.40   # cap (m/s) — deliberately slow for open-loop predictability
