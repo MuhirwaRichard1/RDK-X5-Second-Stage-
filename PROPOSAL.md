@@ -1,6 +1,6 @@
 # RDK X5 Tri-Cam NavBot — Proposal
 
-> **Version:** 1.0 &nbsp;|&nbsp; **Date:** 2026-06-26 &nbsp;|&nbsp; **Author:** Ricardo Muhirwa &nbsp;|&nbsp; **Board:** D-Robotics RDK X5
+> **Version:** 1.0 &nbsp;|&nbsp; **Date:** 2026-06-26 &nbsp;|&nbsp; **Author:** Richard Muhirwa &nbsp;|&nbsp; **Board:** D-Robotics RDK X5
 > **Stage:** 2 (Concept → Architecture → Engineering Plan)
 
 A surround-vision indoor robot that **maps its environment and navigates to a goal using three USB

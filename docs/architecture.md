@@ -79,10 +79,3 @@ flowchart TB
     C6 --> GPIO
     X5 <-.DDS over Wi-Fi.-> HOST
 ```
-
-## Exporting diagrams to PNG/SVG
-GitHub renders Mermaid in Markdown directly, so no export is required for review. To produce static
-images for slides, render with the Mermaid CLI and drop the output in `docs/images/`:
-```bash
-npx -y @mermaid-js/mermaid-cli -i docs/architecture.md -o docs/images/architecture.png
-```
