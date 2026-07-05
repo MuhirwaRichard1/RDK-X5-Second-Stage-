@@ -17,9 +17,10 @@ Hobot.GPIO quirk (seen in servo_sweep.py): PWM.start() gates the sysfs "enable"
 write on the *previous* duty (still 0 right after __init__), so the channel
 never turns on. We force enable by writing "1" to pin_info[pin].pwm_enable.
 
-Pins are BOARD numbering. ENA defaults to pin 18 (pwm1, known-good on the X5
-image). ENB defaults to pin 37 — verify a pwmchip exists for it
-(`ls /sys/class/pwm/`); see RDK_X5_Peripherals.md for enabling extra PWM.
+Pins are BOARD numbering. ENA/ENB default to pins 32/33 (PWM6/PWM7 on the
+34170000 controller). That controller needs `dtoverlay=dtoverlay_pwm3` in
+/boot/config.txt (disables PWM on pins 18/29/31/37); verify with
+`ls /sys/class/pwm/` after reboot.
 """
 
 import math
@@ -38,11 +39,11 @@ class MotorController(Node):
         super().__init__("motor_controller")
 
         # ---- parameters (override in config/params.yaml or launch) ----
-        self.declare_parameter("ena_pin", 18)      # BOARD pin, PWM, motor A (left) speed
-        self.declare_parameter("enb_pin", 37)      # BOARD pin, PWM, motor B (right) speed
+        self.declare_parameter("ena_pin", 32)      # BOARD pin, PWM6, motor A (left) speed
+        self.declare_parameter("enb_pin", 33)      # BOARD pin, PWM7, motor B (right) speed
         self.declare_parameter("in1_pin", 16)      # motor A direction
-        self.declare_parameter("in2_pin", 22)
-        self.declare_parameter("in3_pin", 32)      # motor B direction
+        self.declare_parameter("in2_pin", 18)
+        self.declare_parameter("in3_pin", 22)      # motor B direction
         self.declare_parameter("in4_pin", 36)
         self.declare_parameter("pwm_freq_hz", 1000.0)
         self.declare_parameter("wheel_separation", 0.15)   # m, centre-to-centre
