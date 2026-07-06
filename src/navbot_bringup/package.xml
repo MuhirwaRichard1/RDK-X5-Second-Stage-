@@ -1,0 +1,18 @@
+<?xml version="1.0"?>
+<?xml-model href="http://download.ros.org/schema/package_format3.xsd" schematypens="http://www.w3.org/2001/XMLSchema"?>
+<package format="3">
+  <name>navbot_bringup</name>
+  <version>1.0.0</version>
+  <description>Top-level launch files for the RDK X5 Tri-Cam NavBot.</description>
+  <maintainer email="muhirwaricardo12@gmail.com">Ricardo Muhirwa</maintainer>
+  <license>MIT</license>
+
+  <exec_depend>navbot_cameras</exec_depend>
+  <exec_depend>navbot_perception</exec_depend>
+  <exec_depend>navbot_navigation</exec_depend>
+  <exec_depend>navbot_drive</exec_depend>
+
+  <export>
+    <build_type>ament_python</build_type>
+  </export>
+</package>

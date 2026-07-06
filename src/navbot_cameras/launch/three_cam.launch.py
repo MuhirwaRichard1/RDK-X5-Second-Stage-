@@ -39,7 +39,7 @@ import os
 _BY_PATH = "/dev/v4l/by-path/platform-xhci-hcd.2.auto-usb-0:{port}:1.0-video-index0"
 
 
-def _cam(ns, device, width, height, fps, pixel_format):
+def _cam(ns, device, width, height, fps, pixel_format, calib_file=""):
     """One hobot_usb_cam node, namespaced, with image->image_raw remap."""
     return Node(
         package="hobot_usb_cam",
@@ -55,6 +55,7 @@ def _cam(ns, device, width, height, fps, pixel_format):
             "pixel_format": pixel_format,
             "io_method": "mmap",
             "zero_copy": False,
+            "camera_calibration_file_path": calib_file,
         }],
         remappings=[
             ("image", "image_raw"),
@@ -81,11 +82,16 @@ def generate_launch_description():
             os.path.join(get_package_share_directory("hobot_shm"),
                          "launch/hobot_shm.launch.py")))
 
+    # intrinsics from scripts/11_front_cam_calib.py; empty until calibrated
+    front_calib = "/home/sunrise/rdk-x5-navbot/config/camera_front.yaml"
+    if not os.path.exists(front_calib):
+        front_calib = ""
+
     return LaunchDescription([
         front_dev, left_dev, right_dev,
         shm,
         _cam("cam_front", LaunchConfiguration("front_device"),
-             1280, 720, 30, "mjpeg"),
+             1280, 720, 30, "mjpeg", front_calib),
         _cam("cam_left", LaunchConfiguration("left_device"),
              320, 240, 30, "yuyv"),
         _cam("cam_right", LaunchConfiguration("right_device"),

@@ -1,6 +1,6 @@
 from setuptools import setup
 
-package_name = "navbot_drive"
+package_name = "navbot_perception"
 
 setup(
     name=package_name,
@@ -15,12 +15,12 @@ setup(
     zip_safe=True,
     maintainer="Ricardo Muhirwa",
     maintainer_email="muhirwaricardo12@gmail.com",
-    description="Open-loop L298N differential drive + safety gate (encoderless) for RDK X5.",
+    description="On-BPU perception + obstacle fusion for RDK X5.",
     license="MIT",
     entry_points={
         "console_scripts": [
-            "motor_controller = navbot_drive.motor_controller:main",
-            "safety_gate = navbot_drive.safety_gate:main",
+            "obstacle_fusion = navbot_perception.obstacle_fusion:main",
+            # depth_bpu and detection_bpu to be added (see README / ROADMAP W3)
         ],
     },
 )

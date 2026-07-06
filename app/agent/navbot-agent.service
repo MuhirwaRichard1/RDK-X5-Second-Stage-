@@ -1,0 +1,25 @@
+# navbot-agent — operator WebSocket agent for the RDK X5 NavBot.
+# Installed by install_service.sh but NOT enabled: start it manually with
+#   sudo systemctl start navbot-agent
+# or opt in to boot-start with
+#   sudo systemctl enable navbot-agent
+#
+# Stopping the service kills the whole cgroup, so any ros2 launch the agent
+# started dies with it — no orphaned nodes, motors coast to a stop.
+
+[Unit]
+Description=NavBot operator agent (WebSocket API + mode control)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=root
+WorkingDirectory=/home/sunrise/rdk-x5-navbot
+ExecStart=/home/sunrise/rdk-x5-navbot/app/agent/run_agent.sh
+Restart=on-failure
+RestartSec=3
+TimeoutStopSec=30
+
+[Install]
+WantedBy=multi-user.target

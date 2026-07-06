@@ -1,6 +1,6 @@
 from setuptools import setup
 
-package_name = "navbot_drive"
+package_name = "navbot_navigation"
 
 setup(
     name=package_name,
@@ -15,12 +15,12 @@ setup(
     zip_safe=True,
     maintainer="Ricardo Muhirwa",
     maintainer_email="muhirwaricardo12@gmail.com",
-    description="Open-loop L298N differential drive + safety gate (encoderless) for RDK X5.",
+    description="Reactive local planner + behaviour management for RDK X5.",
     license="MIT",
     entry_points={
         "console_scripts": [
-            "motor_controller = navbot_drive.motor_controller:main",
-            "safety_gate = navbot_drive.safety_gate:main",
+            "local_planner = navbot_navigation.local_planner:main",
+            # behaviour_manager to be added (see README / ROADMAP W5)
         ],
     },
 )

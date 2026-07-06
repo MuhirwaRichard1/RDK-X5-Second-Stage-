@@ -2,7 +2,7 @@
 """
 imu_driver — MPU6050 (I2C5 @ 0x68) -> /imu/data for the RDK X5 Tri-Cam NavBot.
 
-Publishes   : /imu/data  (sensor_msgs/Imu) at `rate_hz` (default 100 Hz).
+Publishes   : /imu/data  (sensor_msgs/Imu) at `rate_hz` (default 200 Hz).
 Orientation : NOT estimated here (orientation_covariance[0] = -1 by REP-145
               convention); the SLAM back-end integrates the raw rates itself.
 
@@ -48,10 +48,14 @@ class ImuDriver(Node):
 
         self.declare_parameter("i2c_bus", 5)
         self.declare_parameter("i2c_addr", 0x68)
-        self.declare_parameter("rate_hz", 100.0)
+        self.declare_parameter("rate_hz", 200.0)
         self.declare_parameter("frame_id", "imu_link")
         self.declare_parameter("calib_samples", 200)
         self.declare_parameter("auto_scale_accel", True)
+        # measured on this unit with scripts/12_imu_noise.py (2026-07-06,
+        # 607 Hz raw, 120 s stationary): worst-axis white-noise variance
+        self.declare_parameter("gyro_variance", 1.6e-6)    # (rad/s)^2
+        self.declare_parameter("accel_variance", 3.4e-3)   # (m/s^2)^2
 
         g = lambda n: self.get_parameter(n).value  # noqa: E731
         self.addr = g("i2c_addr")
@@ -70,10 +74,10 @@ class ImuDriver(Node):
         self.msg.header.frame_id = self.frame_id
         # No orientation estimate (REP-145): first element = -1.
         self.msg.orientation_covariance[0] = -1.0
-        # Conservative static covariances; SLAM treats these as priors.
+        # Measured white-noise covariances (see scripts/12_imu_noise.py).
         for i in (0, 4, 8):
-            self.msg.angular_velocity_covariance[i] = (0.02) ** 2   # (rad/s)^2
-            self.msg.linear_acceleration_covariance[i] = (0.10) ** 2  # (m/s^2)^2
+            self.msg.angular_velocity_covariance[i] = g("gyro_variance")
+            self.msg.linear_acceleration_covariance[i] = g("accel_variance")
 
         self.err_count = 0
         self.timer = self.create_timer(1.0 / rate_hz, self._tick)
@@ -127,6 +131,8 @@ class ImuDriver(Node):
     def _tick(self):
         try:
             a, w = self._read_raw()
+            # stamp as close to the I2C read as possible (VIO time sync)
+            stamp = self.get_clock().now().to_msg()
         except OSError as e:
             self.err_count += 1
             if self.err_count in (1, 10, 100) or self.err_count % 1000 == 0:
@@ -135,7 +141,7 @@ class ImuDriver(Node):
         self.err_count = 0
 
         m = self.msg
-        m.header.stamp = self.get_clock().now().to_msg()
+        m.header.stamp = stamp
         m.linear_acceleration.x = a[0] * self.accel_scale * G
         m.linear_acceleration.y = a[1] * self.accel_scale * G
         m.linear_acceleration.z = a[2] * self.accel_scale * G
