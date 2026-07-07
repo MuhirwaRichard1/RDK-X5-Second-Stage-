@@ -1,12 +1,13 @@
 """Video widgets: a VideoWidget renders JPEG frames letterboxed with an
 optional sector HUD (the /obstacles fan) painted over the front view;
-VideoPanel arranges left | front | right as equal 640x480 tiles in one row
-(sides toggleable)."""
+VideoPanel arranges front | left | right as equal-size tiles in one row,
+all three scaling together to fill whatever space is available (sides
+toggleable)."""
 
 import math
 import time
 
-from PySide6.QtCore import QSize, Qt, Signal
+from PySide6.QtCore import Qt, Signal
 from PySide6.QtGui import QColor, QImage, QPainter, QPen
 from PySide6.QtWidgets import (QCheckBox, QGridLayout, QHBoxLayout, QLabel,
                                QSizePolicy, QVBoxLayout, QWidget)
@@ -38,15 +39,8 @@ class VideoWidget(QWidget):
         self._frames = 0
         self._fps = 0.0
         self._fps_t0 = time.monotonic()
-<<<<<<< HEAD
         self.setMinimumSize(160, 120)
         self.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
-=======
-        self.setMinimumSize(320, 240)
-
-    def sizeHint(self):
-        return QSize(640, 480)
->>>>>>> ee971068262831a1b6350943a0f6ff02a875da3c
 
     def set_frame(self, jpeg: bytes):
         img = QImage.fromData(jpeg, "JPEG")
@@ -194,20 +188,10 @@ class VideoPanel(QWidget):
             self._boxes[cam] = box
         toggles.addStretch(1)
 
-<<<<<<< HEAD
         self._grid = QGridLayout()
         self._grid.addWidget(self.front, 0, 0)
         self._grid.addWidget(self.left, 0, 1)
         self._grid.addWidget(self.right, 0, 2)
-=======
-        # one row, cockpit order: left | front | right, equal 640x480 tiles
-        grid = QGridLayout()
-        grid.addWidget(self.left, 0, 0)
-        grid.addWidget(self.front, 0, 1)
-        grid.addWidget(self.right, 0, 2)
-        for col in range(3):
-            grid.setColumnStretch(col, 1)
->>>>>>> ee971068262831a1b6350943a0f6ff02a875da3c
 
         lay = QVBoxLayout(self)
         lay.addLayout(toggles)
