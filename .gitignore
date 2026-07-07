@@ -1,6 +1,8 @@
 build/
 install/
 log/
+app/desktop/dist/
+app/desktop/.venv/
 __pycache__/
 *.pyc
 *.bag

@@ -9,8 +9,10 @@
 
 import argparse
 import sys
+from pathlib import Path
 
 from PySide6.QtCore import QTimer
+from PySide6.QtGui import QIcon
 from PySide6.QtWidgets import QApplication
 
 from .main_window import MainWindow
@@ -25,6 +27,12 @@ def main():
     args = p.parse_args()
 
     app = QApplication(sys.argv)
+    app.setApplicationName("navbot-console")
+    app.setApplicationDisplayName("NavBot Console")
+    app.setDesktopFileName("navbot-console")   # Linux: match .desktop for icon
+    icon = Path(__file__).resolve().parent / "assets" / "icon.png"
+    if icon.exists():                          # same layout inside PyInstaller
+        app.setWindowIcon(QIcon(str(icon)))
     win = MainWindow()
     app.installEventFilter(win)
 

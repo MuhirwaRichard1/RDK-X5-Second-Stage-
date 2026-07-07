@@ -1,0 +1,9 @@
+[Desktop Entry]
+Type=Application
+Name=NavBot Console
+Comment=Drive and monitor the RDK X5 NavBot
+Exec=@EXEC@
+Icon=navbot-console
+Terminal=false
+Categories=Utility;
+StartupWMClass=navbot-console

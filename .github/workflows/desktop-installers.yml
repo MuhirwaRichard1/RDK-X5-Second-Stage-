@@ -1,0 +1,68 @@
+name: desktop-installers
+
+# Builds the NavBot Console installers on real x86 runners (PyInstaller
+# cannot cross-compile from the robot's ARM64). Tag pushes publish a
+# GitHub Release with the downloadable installers attached.
+on:
+  push:
+    tags: ["console-v*"]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  linux:
+    runs-on: ubuntu-22.04        # older glibc = runs on more distros
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - name: Qt runtime libs for PyInstaller analysis
+        run: sudo apt-get update && sudo apt-get install -y libegl1 libopengl0 libxkbcommon0 libgl1
+      - run: bash app/desktop/packaging/linux/build.sh
+      - uses: actions/upload-artifact@v4
+        with:
+          name: navbot-console-linux
+          path: app/desktop/dist/*.tar.gz
+          if-no-files-found: error
+
+  windows:
+    runs-on: windows-latest      # Inno Setup 6 is preinstalled
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - run: powershell -ExecutionPolicy Bypass -File app\desktop\packaging\windows\build.ps1
+      - uses: actions/upload-artifact@v4
+        with:
+          name: navbot-console-windows
+          path: |
+            app/desktop/dist/*-windows-setup.exe
+            app/desktop/dist/*-windows-portable.zip
+          if-no-files-found: error
+
+  release:
+    if: startsWith(github.ref, 'refs/tags/console-v')
+    needs: [linux, windows]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          merge-multiple: true
+          path: dist
+      - name: Create GitHub Release with installers
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release create "$GITHUB_REF_NAME" dist/* \
+            --repo "$GITHUB_REPOSITORY" \
+            --title "NavBot Console $GITHUB_REF_NAME" \
+            --notes "Desktop operator app installers.
+
+          **Windows:** download and run \`navbot-console-*-windows-setup.exe\` (desktop shortcut option is pre-checked).
+          **Linux:** \`tar xzf navbot-console-*-linux-x86_64.tar.gz && cd navbot-console-* && ./install.sh\` — adds app-menu entry + desktop shortcut.
+
+          Connect to \`ws://<robot-ip>:8080\`. Details: app/desktop/README.md."
