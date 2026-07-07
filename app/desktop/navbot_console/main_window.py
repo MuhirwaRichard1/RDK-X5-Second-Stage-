@@ -11,6 +11,7 @@ from PySide6.QtWidgets import (QHBoxLayout, QLabel, QLineEdit, QMainWindow,
 
 from .client import RobotClient
 from .teleop import TeleopController
+from .widgets.attitude_panel import AttitudePanel
 from .widgets.estop_button import EStopButton
 from .widgets.health_panel import HealthPanel
 from .widgets.joystick import JoystickWidget
@@ -40,6 +41,7 @@ class MainWindow(QMainWindow):
         self.mode_bar = ModeBar()
         self.estop = EStopButton()
         self.joystick = JoystickWidget()
+        self.attitude = AttitudePanel()
         self.health = HealthPanel()
         self.log = LogPanel()
 
@@ -70,6 +72,7 @@ class MainWindow(QMainWindow):
         speed_row.addWidget(self.speed, 1)
         right.addLayout(speed_row)
         right.addWidget(self._teleop_readout)
+        right.addWidget(self.attitude)
         right.addWidget(self.health, 1)
         right_w = QWidget()
         right_w.setLayout(right)
@@ -101,6 +104,7 @@ class MainWindow(QMainWindow):
         self.client.latencyMs.connect(self.health.on_latency)
         self.client.transportChanged.connect(self.health.on_transport)
         self.client.sectorsReceived.connect(self.video.on_sectors)
+        self.client.attitudeReceived.connect(self.attitude.on_attitude)
         self.client.logReceived.connect(self.log.on_log)
         self.client.errorReceived.connect(
             lambda m: self.log.on_log({"src": "agent", "level": "error", "line": m}))

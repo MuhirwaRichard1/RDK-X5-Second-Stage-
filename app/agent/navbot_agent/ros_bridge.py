@@ -54,6 +54,7 @@ class RosBridge:
         self._counters = {t: 0 for t in config.RATE_TOPICS}
         self._rates_taken = time.monotonic()
         self._rates_last = {t: 0 for t in config.RATE_TOPICS}
+        self.attitude = None            # (roll°, pitch°, yaw°, yaw_rate°/s, t_mono)
 
     # ---------------- lifecycle ----------------
 
@@ -137,8 +138,11 @@ class _AgentNode(Node):
                                  lambda m: self._count("/cmd_vel"), 10)
         self.create_subscription(Twist, "/cmd_vel_safe",
                                  lambda m: self._count("/cmd_vel_safe"), 10)
-        self.create_subscription(Imu, "/imu/data",
-                                 lambda m: self._count("/imu/data"), sensor)
+        self.create_subscription(Imu, "/imu/data", self._on_imu, sensor)
+        # complementary-filter state (executor thread only)
+        self._att = [0.0, 0.0, 0.0]     # roll, pitch, yaw (rad)
+        self._att_t = None              # last msg stamp (s)
+        self._att_ready = False         # first sample snaps to accel angles
         self.create_subscription(Range, "/range_forward", self._on_range, 10)
         self.create_subscription(Bool, "/estop_state", self._on_estop_state, latched)
 
@@ -153,6 +157,47 @@ class _AgentNode(Node):
 
     def _count(self, topic):
         self.b._counters[topic] += 1
+
+    def _on_imu(self, m):
+        """200 Hz complementary filter over the raw MPU6050 stream.
+
+        imu_driver publishes REP-103 body axes (x fwd, y left, z up), rates
+        bias-corrected, accel auto-scaled to |g|. bridge.attitude is stored
+        in GCS display convention: roll + = bank right, pitch + = nose up,
+        yaw/heading clockwise 0-360° relative to power-on (gyro-only, drifts)."""
+        self._count("/imu/data")
+        t = m.header.stamp.sec + m.header.stamp.nanosec * 1e-9
+        ax, ay, az = (m.linear_acceleration.x, m.linear_acceleration.y,
+                      m.linear_acceleration.z)
+        norm = math.sqrt(ax * ax + ay * ay + az * az)
+        acc_ok = 4.9 < norm < 14.7          # ~0.5..1.5 g: usable for leveling
+        dt = 0.0 if self._att_t is None else min(max(t - self._att_t, 0.0), 0.05)
+        self._att_t = t
+
+        if not self._att_ready:
+            if not acc_ok:
+                return
+            self._att = [math.atan2(ay, az),
+                         math.atan2(-ax, math.hypot(ay, az)), 0.0]
+            self._att_ready = True
+        else:
+            r, p, y = self._att
+            r += m.angular_velocity.x * dt   # small-angle Euler: fine for a
+            p += m.angular_velocity.y * dt   # ground robot's roll/pitch range
+            y += m.angular_velocity.z * dt
+            if acc_ok:                       # 0.98 @ 200 Hz -> tau ~ 0.25 s
+                r = 0.98 * r + 0.02 * math.atan2(ay, az)
+                p = 0.98 * p + 0.02 * math.atan2(-ax, math.hypot(ay, az))
+            y = (y + math.pi) % (2 * math.pi) - math.pi
+            self._att = [r, p, y]
+
+        r, p, y = self._att
+        self.b.attitude = (
+            math.degrees(r) - config.ATT_TRIM_ROLL_DEG,
+            -math.degrees(p) - config.ATT_TRIM_PITCH_DEG,
+            (-math.degrees(y)) % 360.0,
+            -math.degrees(m.angular_velocity.z),
+            time.monotonic())
 
     def _on_front(self, msg):
         self._count("/cam_front/image_raw")

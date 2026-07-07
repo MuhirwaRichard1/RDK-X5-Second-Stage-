@@ -49,7 +49,8 @@ async def _amain(args):
         log.warning("UDP fast path unavailable (%s) — WS only", e)
 
     tasks = [asyncio.create_task(WsServer(app, args.host, args.port).run()),
-             asyncio.create_task(app.telemetry_loop())]
+             asyncio.create_task(app.telemetry_loop()),
+             asyncio.create_task(app.attitude_loop())]
     try:
         if bridge:
             bridge.start(app, loop)

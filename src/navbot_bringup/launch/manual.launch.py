@@ -41,6 +41,8 @@ def generate_launch_description():
     return LaunchDescription([
         motors,
         cameras,
+        Node(package="navbot_slam", executable="imu_driver",
+             name="imu_driver", output="screen"),
         Node(package="navbot_perception", executable="obstacle_fusion",
              name="obstacle_fusion", output="screen"),
         Node(package="navbot_drive", executable="safety_gate",

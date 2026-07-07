@@ -136,3 +136,16 @@ class AgentApp:
             age = self.bridge.teleop_age_ms() if self.bridge else None
             self.hub.broadcast_fast(protocol.telemetry(
                 rates, range_cm, self.health.sample(), age))
+
+    async def attitude_loop(self):
+        period = 1.0 / config.ATTITUDE_HZ
+        while True:
+            await asyncio.sleep(period)
+            if not self.hub or not self.hub.sessions or not self.bridge:
+                continue
+            att = self.bridge.attitude
+            if att is None or time.monotonic() - att[4] > 1.0:
+                continue                   # no IMU running — send nothing
+            self.hub.broadcast_fast(protocol.attitude(
+                round(att[0], 1), round(att[1], 1),
+                round(att[2], 1), round(att[3], 1)))

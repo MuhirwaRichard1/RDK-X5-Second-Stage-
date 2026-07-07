@@ -91,6 +91,13 @@ def sectors(angle_min, angle_max, status, free):
             "angle_max": angle_max, "status": status, "free": free}
 
 
+def attitude(roll_deg, pitch_deg, yaw_deg, yaw_rate_dps):
+    """10 Hz orientation for the console instruments. Yaw is gyro-integrated
+    (no magnetometer) — relative to power-on heading, drifts slowly."""
+    return {"v": PROTO_VERSION, "type": "att", "roll": roll_deg,
+            "pitch": pitch_deg, "yaw": yaw_deg, "yaw_rate": yaw_rate_dps}
+
+
 def log_msg(src, level, line):
     return {"v": PROTO_VERSION, "type": "log", "src": src,
             "level": level, "line": line}

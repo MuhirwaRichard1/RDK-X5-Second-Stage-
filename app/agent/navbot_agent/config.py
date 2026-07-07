@@ -20,6 +20,14 @@ TELEOP_RATE_HZ = 20.0     # /cmd_vel publish rate while teleop is fresh
 TELEOP_STALE_S = 0.4      # no teleop msg for this long -> one zero, then silence
 
 TELEMETRY_HZ = 2.0
+ATTITUDE_HZ = 10.0        # roll/pitch/yaw stream for the console instruments
+
+# IMU mounting offset, subtracted from the displayed attitude (display
+# convention: roll + = right, pitch + = nose up). Measured 2026-07-07 with
+# the robot flat on the bench; re-measure (set to 0, read ATT via ws_probe)
+# if the MPU6050 is ever remounted.
+ATT_TRIM_ROLL_DEG = -5.1
+ATT_TRIM_PITCH_DEG = 15.1
 LOG_RING = 200            # launch/agent log lines replayed to a new client
 
 # Workspace + environment for ros2 launch subprocesses.

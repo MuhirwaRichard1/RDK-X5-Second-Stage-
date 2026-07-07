@@ -45,6 +45,7 @@ class RobotClient(QObject):
     stateReceived = Signal(dict)
     telemetryReceived = Signal(dict)
     sectorsReceived = Signal(dict)
+    attitudeReceived = Signal(dict)          # 10 Hz roll/pitch/yaw/yaw_rate
     logReceived = Signal(dict)
     errorReceived = Signal(str)
     videoFrame = Signal(int, bytes, int)     # cam_id, jpeg, seq
@@ -198,6 +199,8 @@ class RobotClient(QObject):
             self.telemetryReceived.emit(msg)
         elif t == "sectors":
             self.sectorsReceived.emit(msg)
+        elif t == "att":
+            self.attitudeReceived.emit(msg)
         elif t == "log":
             self.logReceived.emit(msg)
         elif t == "pong":

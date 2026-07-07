@@ -182,6 +182,7 @@ async def main():
         teleop = asyncio.create_task(teleop_task()) if args.teleop_sine else None
         t_end = time.monotonic() + args.watch
         n_sectors = 0
+        n_att = 0
         while time.monotonic() < t_end:
             try:
                 m = await asyncio.wait_for(ws.recv(), timeout=max(0.1, t_end - time.monotonic()))
@@ -202,7 +203,12 @@ async def main():
                 continue
             msg = json.loads(m)
             t = msg.get("type")
-            if t == "sectors":
+            if t == "att":
+                n_att += 1
+                if n_att % 20 == 1:
+                    print(f"ATT roll={msg['roll']:+.1f} pitch={msg['pitch']:+.1f} "
+                          f"yaw={msg['yaw']:.1f} rate={msg['yaw_rate']:+.1f}")
+            elif t == "sectors":
                 n_sectors += 1
                 if n_sectors % 20 == 1:
                     st = msg["status"]
