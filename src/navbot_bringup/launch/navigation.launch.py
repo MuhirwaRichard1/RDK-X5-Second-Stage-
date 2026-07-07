@@ -7,6 +7,9 @@ navigation.launch.py — PIDNet-based reactive navigation stack.
         -> local_planner    (/obstacles -> /cmd_vel)
         -> safety_gate      (/cmd_vel + TF-Luna + /estop -> /cmd_vel_safe)
         -> motor_controller (only when motors:=true)
+        -> detection_bpu    (YOLO11 on BPU, idle until /perception/yolo11_enable)
+        -> depth_bpu        (Depth Anything on BPU, front cam only, idle
+                              until /perception/depth_enable)
 
 Default is motors:=false so the whole perception/planning chain can be
 verified with `ros2 topic hz|echo` before anything moves:
@@ -52,4 +55,8 @@ def generate_launch_description():
         Node(package="navbot_drive", executable="motor_controller",
              name="motor_controller", output="screen",
              condition=IfCondition(LaunchConfiguration("motors"))),
+        Node(package="navbot_perception", executable="detection_bpu",
+             name="detection_bpu", output="screen"),
+        Node(package="navbot_perception", executable="depth_bpu",
+             name="depth_bpu", output="screen"),
     ])

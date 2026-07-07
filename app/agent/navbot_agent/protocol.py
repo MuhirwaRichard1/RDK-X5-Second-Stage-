@@ -37,7 +37,7 @@ UDP_VIDEO_S = struct.Struct(">BBHIBB")
 
 UDP_CHUNK = 1200            # video fragment payload — fits any sane MTU
 
-CLIENT_TYPES = {"hello", "teleop", "estop", "set_mode", "video", "ping"}
+CLIENT_TYPES = {"hello", "teleop", "estop", "set_mode", "video", "ping", "set_model"}
 
 
 def pack_video(cam_id: int, seq: int, mono_ms: int, jpeg: bytes) -> bytes:
@@ -89,6 +89,20 @@ def telemetry(rates, range_cm, health, teleop_age_ms):
 def sectors(angle_min, angle_max, status, free):
     return {"v": PROTO_VERSION, "type": "sectors", "angle_min": angle_min,
             "angle_max": angle_max, "status": status, "free": free}
+
+
+def grid_overlay(camera, kind, rows, cols, cells):
+    """Coarse per-cell HUD overlay — pidnet segmentation or depth, same
+    shape of data, distinguished by `kind` (0=pidnet, 1=depth)."""
+    return {"v": PROTO_VERSION, "type": "grid_overlay", "camera": camera,
+            "kind": kind, "rows": rows, "cols": cols, "cells": cells}
+
+
+def detections(camera, boxes):
+    """YOLO11 boxes for one camera frame. `boxes` is a list of
+    {x1,y1,x2,y2,score,class_name} dicts, coords normalized 0..1."""
+    return {"v": PROTO_VERSION, "type": "detections", "camera": camera,
+            "boxes": boxes}
 
 
 def attitude(roll_deg, pitch_deg, yaw_deg, yaw_rate_dps):

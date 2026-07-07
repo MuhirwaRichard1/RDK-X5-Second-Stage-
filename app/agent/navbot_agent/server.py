@@ -198,6 +198,9 @@ class WsServer:
             self.app.on_set_mode(str(msg.get("mode", "")), session)
         elif t == "video":
             self.app.on_video(session, msg)
+        elif t == "set_model":
+            self.app.on_set_model(str(msg.get("model", "")),
+                                  bool(msg.get("enable", True)), session)
         # a repeated "hello" is harmless — ignore
 
 

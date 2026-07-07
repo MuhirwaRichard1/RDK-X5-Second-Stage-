@@ -54,6 +54,15 @@ LAUNCH_STOP_SIGINT_S = 12.0   # grace after SIGINT before SIGTERM
 LAUNCH_STOP_SIGTERM_S = 3.0   # grace after SIGTERM before SIGKILL
 MODE_ACTIVE_TIMEOUT_S = 25.0  # /obstacles (or /estop service) must appear by then
 
+# Perception model overlays. pidnet/yolo11 are mutually exclusive (shared
+# BPU); depthanything (front camera only) is independent of both.
+MODELS = ("pidnet", "yolo11", "depthanything")
+MODEL_ENABLE_TOPIC = {
+    "pidnet": "/perception/pidnet_overlay_enable",
+    "yolo11": "/perception/yolo11_enable",
+    "depthanything": "/perception/depth_enable",
+}
+
 # Cameras: name -> binary-protocol id. Front is CompressedImage (JPEG),
 # sides are raw YUYV 320x240 that the agent JPEG-encodes.
 CAMERAS = {"front": 0, "left": 1, "right": 2}

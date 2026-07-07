@@ -30,7 +30,7 @@ from geometry_msgs.msg import Twist
 from sensor_msgs.msg import CompressedImage, Image, Imu, Range
 from std_msgs.msg import Bool
 from std_srvs.srv import SetBool
-from navbot_msgs.msg import Sectors
+from navbot_msgs.msg import Detections, GridOverlay, Sectors
 
 from . import config, protocol
 
@@ -51,6 +51,7 @@ class RosBridge:
         self.estop_intent = None        # operator latch (None = untouched)
         self.teleop_enabled = False     # set by launch manager (manual mode)
         self._teleop = None             # (vx, wz, t_mono)
+        self.model_intent = {m: False for m in config.MODELS}  # operator toggle
         self._counters = {t: 0 for t in config.RATE_TOPICS}
         self._rates_taken = time.monotonic()
         self._rates_last = {t: 0 for t in config.RATE_TOPICS}
@@ -89,6 +90,17 @@ class RosBridge:
 
     def request_estop(self, engage):
         self.estop_intent = bool(engage)
+
+    def set_model_enable(self, model, enable):
+        self.model_intent = {**self.model_intent, model: bool(enable)}
+
+    def reassert_models(self):
+        """Force every model-enable topic to be republished on the next
+        reconcile tick — call after a mode switch restarts the perception
+        nodes, since their enable flags reset to False but our publish
+        cache doesn't know that happened."""
+        if self.node:
+            self.node.force_model_reassert()
 
     @property
     def range_cm(self):
@@ -146,11 +158,20 @@ class _AgentNode(Node):
         self.create_subscription(Range, "/range_forward", self._on_range, 10)
         self.create_subscription(Bool, "/estop_state", self._on_estop_state, latched)
 
+        self.create_subscription(GridOverlay, "/perception/grid_overlay",
+                                 self._on_grid_overlay, sensor)
+        self.create_subscription(Detections, "/perception/detections",
+                                 self._on_detections, sensor)
+        self._model_pub = {m: self.create_publisher(Bool, topic, latched)
+                           for m, topic in config.MODEL_ENABLE_TOPIC.items()}
+        self._model_published = {m: False for m in config.MODELS}
+
         self._cmd_pub = self.create_publisher(Twist, "/cmd_vel", 10)
         self._estop_cli = self.create_client(SetBool, "/estop")
 
         self.create_timer(1.0 / config.TELEOP_RATE_HZ, self._teleop_tick)
         self.create_timer(0.1, self._estop_reconcile)
+        self.create_timer(0.5, self._model_reconcile)
         self.get_logger().info("navbot_agent bridge node up")
 
     # ---------------- subscriptions ----------------
@@ -221,6 +242,23 @@ class _AgentNode(Node):
                 round(msg.angle_min, 4), round(msg.angle_max, 4),
                 list(msg.status), [round(f, 3) for f in msg.free_fraction]))
 
+    def _on_grid_overlay(self, msg):
+        b = self.b
+        if b.app and b.app.hub and b.app.hub.sessions:
+            b._post(b.app.hub.broadcast_fast, protocol.grid_overlay(
+                msg.camera, int(msg.kind), int(msg.rows), int(msg.cols),
+                list(msg.cells)))
+
+    def _on_detections(self, msg):
+        b = self.b
+        if b.app and b.app.hub and b.app.hub.sessions:
+            boxes = [{"x1": round(x1, 4), "y1": round(y1, 4),
+                      "x2": round(x2, 4), "y2": round(y2, 4),
+                      "score": round(score, 3), "class_name": name}
+                     for x1, y1, x2, y2, score, name in
+                     zip(msg.x1, msg.y1, msg.x2, msg.y2, msg.score, msg.class_name)]
+            b._post(b.app.hub.broadcast_fast, protocol.detections(msg.camera, boxes))
+
     def _on_range(self, msg):
         self._count("/range_forward")
         cm = msg.range * 100.0 if not math.isnan(msg.range) else math.nan
@@ -262,6 +300,21 @@ class _AgentNode(Node):
         self._estop_inflight_t = now
         fut = self._estop_cli.call_async(SetBool.Request(data=b.estop_intent))
         fut.add_done_callback(self._estop_done)
+
+    def force_model_reassert(self):
+        """None never equals a bool, so the next reconcile tick republishes
+        every model-enable topic regardless of its last-published value."""
+        self._model_published = {m: None for m in config.MODELS}
+
+    def _model_reconcile(self):
+        """Publish a latched Bool for any model toggle that changed —
+        moves the operator's intent (set on the asyncio thread) onto the
+        ROS executor thread."""
+        intent = self.b.model_intent
+        for model, want in intent.items():
+            if want != self._model_published[model]:
+                self._model_pub[model].publish(Bool(data=want))
+                self._model_published[model] = want
 
     def _estop_done(self, fut):
         self._estop_inflight_t = None

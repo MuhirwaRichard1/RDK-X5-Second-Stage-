@@ -45,6 +45,8 @@ class RobotClient(QObject):
     stateReceived = Signal(dict)
     telemetryReceived = Signal(dict)
     sectorsReceived = Signal(dict)
+    gridOverlayReceived = Signal(dict)
+    detectionsReceived = Signal(dict)
     attitudeReceived = Signal(dict)          # 10 Hz roll/pitch/yaw/yaw_rate
     logReceived = Signal(dict)
     errorReceived = Signal(str)
@@ -130,6 +132,9 @@ class RobotClient(QObject):
     def send_mode(self, mode):
         self.send({"type": "set_mode", "mode": mode})
 
+    def send_model(self, model, enable):
+        self.send({"type": "set_model", "model": model, "enable": bool(enable)})
+
     def send_video(self, cam, enable, fps=None, quality=None):
         msg = {"type": "video", "cam": cam, "enable": bool(enable)}
         if fps:
@@ -199,6 +204,10 @@ class RobotClient(QObject):
             self.telemetryReceived.emit(msg)
         elif t == "sectors":
             self.sectorsReceived.emit(msg)
+        elif t == "grid_overlay":
+            self.gridOverlayReceived.emit(msg)
+        elif t == "detections":
+            self.detectionsReceived.emit(msg)
         elif t == "att":
             self.attitudeReceived.emit(msg)
         elif t == "log":

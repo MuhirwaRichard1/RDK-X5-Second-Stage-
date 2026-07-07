@@ -28,6 +28,7 @@ class AgentApp:
         self.mode_status = "active"
         self.mode_detail = ""
         self.udp_port = None               # set by main() when the UDP socket binds
+        self.active_models = {m: False for m in config.MODELS}
 
     # ---------------- state / welcome ----------------
 
@@ -41,6 +42,7 @@ class AgentApp:
             "estop": {"latched": self.estop_latched,
                       "confirmed": self.bridge.estop_confirmed if self.bridge else None},
             "detail": self.mode_detail,
+            "models": dict(self.active_models),
         }
 
     def make_welcome(self, session=None):
@@ -60,6 +62,10 @@ class AgentApp:
     def set_mode_state(self, mode, status, detail=""):
         """Called by the launch manager on every transition step."""
         self.mode, self.mode_status, self.mode_detail = mode, status, detail
+        if status == "active" and self.bridge:
+            # the perception nodes just (re)started — their enable flags
+            # reset to False, so re-assert whatever the operator had on.
+            self.bridge.reassert_models()
         self.broadcast_state()
 
     # ---------------- logging ----------------
@@ -102,6 +108,26 @@ class AgentApp:
             session.send_json(protocol.error("mode control unavailable (--no-ros)"))
             return
         asyncio.get_running_loop().create_task(self.launch_mgr.set_mode(mode))
+
+    def on_set_model(self, model, enable, session):
+        if model not in config.MODELS:
+            session.send_json(protocol.error(f"unknown model: {model}"))
+            return
+        changed = {}
+        if enable and model in ("pidnet", "yolo11"):
+            other = "yolo11" if model == "pidnet" else "pidnet"
+            if self.active_models[other]:
+                self.active_models[other] = False
+                changed[other] = False
+        if self.active_models[model] != enable:
+            self.active_models[model] = enable
+            changed[model] = enable
+        if not changed:
+            return
+        if self.bridge:
+            for m, v in changed.items():
+                self.bridge.set_model_enable(m, v)
+        self.broadcast_state()
 
     def on_video(self, session, msg):
         cam = msg.get("cam")

@@ -20,7 +20,8 @@ setup(
     entry_points={
         "console_scripts": [
             "obstacle_fusion = navbot_perception.obstacle_fusion:main",
-            # depth_bpu and detection_bpu to be added (see README / ROADMAP W3)
+            "detection_bpu = navbot_perception.detection_bpu:main",
+            "depth_bpu = navbot_perception.depth_bpu:main",
         ],
     },
 )

@@ -23,42 +23,20 @@ import cv2
 import numpy as np
 import rclpy
 from rclpy.node import Node
+from rclpy.qos import QoSProfile, ReliabilityPolicy, DurabilityPolicy
 from sensor_msgs.msg import CompressedImage, Image
+from std_msgs.msg import Bool
 
 from hobot_dnn import pyeasy_dnn as dnn
-from navbot_msgs.msg import Sectors
+from navbot_msgs.msg import GridOverlay, Sectors
+
+from .imgproc import bgr2nv12, decode
 
 MODEL_BIN = "/home/sunrise/Desktop/RDK/model_output_pidnets/pidnet_s_576x768.bin"
 DRIVABLE = (0, 1, 9)            # Cityscapes: road, sidewalk, terrain
 ROI_TOP_FRAC = 0.55             # bottom 45 % of the class map = near field
-
-
-def bgr2nv12(bgr):
-    h, w = bgr.shape[:2]
-    yuv = cv2.cvtColor(bgr, cv2.COLOR_BGR2YUV_I420).reshape(h * w * 3 // 2)
-    y = yuv[: h * w]
-    uv = yuv[h * w:].reshape(2, h * w // 4).transpose(1, 0).reshape(h * w // 2)
-    return np.concatenate([y, uv])
-
-
-def decode(msg):
-    """sensor_msgs Image/CompressedImage -> BGR ndarray (None if unsupported)."""
-    if isinstance(msg, CompressedImage):
-        return cv2.imdecode(np.frombuffer(msg.data, np.uint8), cv2.IMREAD_COLOR)
-    buf = np.frombuffer(msg.data, np.uint8)
-    enc = msg.encoding.lower()
-    if enc in ("yuyv", "yuv422_yuy2", "yuy2"):
-        return cv2.cvtColor(buf.reshape(msg.height, msg.width, 2),
-                            cv2.COLOR_YUV2BGR_YUY2)
-    if enc == "nv12":
-        return cv2.cvtColor(buf.reshape(msg.height * 3 // 2, msg.width),
-                            cv2.COLOR_YUV2BGR_NV12)
-    if enc == "bgr8":
-        return buf.reshape(msg.height, msg.width, 3)
-    if enc == "rgb8":
-        return cv2.cvtColor(buf.reshape(msg.height, msg.width, 3),
-                            cv2.COLOR_RGB2BGR)
-    return None
+OVERLAY_ROWS = 12
+OVERLAY_COLS = 16
 
 
 class ObstacleFusion(Node):
@@ -90,6 +68,7 @@ class ObstacleFusion(Node):
 
         self.model = dnn.load(MODEL_BIN)[0]
         _, _, self.mh, self.mw = self.model.inputs[0].properties.shape
+        self.overlay_enabled = False
 
         self.cams = {
             "front": dict(axis=np.radians(g("front_axis_deg")),
@@ -111,7 +90,13 @@ class ObstacleFusion(Node):
         self.create_subscription(Image, g("right_topic"),
                                  lambda m: self._store("right", m), qos)
 
+        latched = QoSProfile(depth=1, reliability=ReliabilityPolicy.RELIABLE,
+                             durability=DurabilityPolicy.TRANSIENT_LOCAL)
+        self.create_subscription(Bool, "/perception/pidnet_overlay_enable",
+                                 self._on_overlay_enable, latched)
+
         self.pub = self.create_publisher(Sectors, "/obstacles", 10)
+        self.grid_pub = self.create_publisher(GridOverlay, "/perception/grid_overlay", 10)
         self.create_timer(1.0 / g("rate_hz"), self._tick)
         self.get_logger().info(
             f"obstacle_fusion up: {self.n} sectors "
@@ -121,28 +106,57 @@ class ObstacleFusion(Node):
     def _store(self, key, msg):
         self.cams[key].update(frame=msg, stamp=time.time())
 
-    def _column_free(self, bgr):
-        """-> per-column drivable fraction (96,), left image edge first."""
+    def _on_overlay_enable(self, msg):
+        self.overlay_enabled = bool(msg.data)
+
+    def _infer(self, bgr):
+        """-> (per-column drivable fraction (96,), full class map (mh//8, mw//8))."""
         resized = cv2.resize(bgr, (self.mw, self.mh),
                              interpolation=cv2.INTER_LINEAR)
         out = self.model.forward(bgr2nv12(resized))
         classes = np.argmax(
             out[0].buffer.reshape(19, self.mh // 8, self.mw // 8), axis=0)
         roi = classes[int(classes.shape[0] * ROI_TOP_FRAC):]
-        return np.isin(roi, DRIVABLE).mean(axis=0)
+        col_free = np.isin(roi, DRIVABLE).mean(axis=0)
+        return col_free, classes
+
+    def _grid_from_classes(self, classes):
+        """-> (OVERLAY_ROWS, OVERLAY_COLS) uint8 grid of Sectors.FREE/BLOCKED,
+        block-reducing the full class map for a cheap HUD overlay (no extra
+        BPU work — reuses the forward pass already run for /obstacles)."""
+        grid = np.empty((OVERLAY_ROWS, OVERLAY_COLS), dtype=np.uint8)
+        for r, row_cells in enumerate(np.array_split(classes, OVERLAY_ROWS, axis=0)):
+            for c, cell in enumerate(np.array_split(row_cells, OVERLAY_COLS, axis=1)):
+                free = np.isin(cell, DRIVABLE).mean() >= self.free_thresh
+                grid[r, c] = Sectors.FREE if free else Sectors.BLOCKED
+        return grid
+
+    def _publish_grid(self, camera, classes):
+        grid = self._grid_from_classes(classes)
+        msg = GridOverlay()
+        msg.header.stamp = self.get_clock().now().to_msg()
+        msg.header.frame_id = "base_link"
+        msg.camera = camera
+        msg.kind = GridOverlay.KIND_PIDNET
+        msg.rows = OVERLAY_ROWS
+        msg.cols = OVERLAY_COLS
+        msg.cells = [int(v) for v in grid.flatten()]
+        self.grid_pub.publish(msg)
 
     def _tick(self):
         acc = np.zeros(self.n)
         cnt = np.zeros(self.n, dtype=int)
         now = time.time()
 
-        for c in self.cams.values():
+        for name, c in self.cams.items():
             if c["frame"] is None or now - c["stamp"] > self.stale_s:
                 continue                     # stale cam -> its sectors stay UNKNOWN
             bgr = decode(c["frame"])
             if bgr is None:
                 continue
-            col_free = self._column_free(bgr)
+            col_free, classes = self._infer(bgr)
+            if self.overlay_enabled:
+                self._publish_grid(name, classes)
             ncols = col_free.shape[0]
             # image column -> world bearing: left edge = axis + hfov/2 (REP-103)
             bearings = c["axis"] + c["hfov"] * (0.5 - (np.arange(ncols) + 0.5) / ncols)
