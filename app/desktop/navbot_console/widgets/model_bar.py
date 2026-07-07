@@ -35,6 +35,9 @@ class ModelBar(QWidget):
         if enabled and other and self._buttons[other].isChecked():
             self._buttons[other].setChecked(False)
             self._buttons[other].setStyleSheet(_STYLE[False])
+            # setChecked() doesn't fire clicked, so tell the robot explicitly
+            # — and before the enable, so it frees BPU memory first
+            self.modelToggled.emit(other, False)
         self._buttons[name].setStyleSheet(_STYLE[enabled])
         self.modelToggled.emit(name, enabled)
 

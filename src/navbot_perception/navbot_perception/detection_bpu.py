@@ -95,11 +95,25 @@ class DetectionBpu(Node):
         self.cams[key].update(frame=msg, stamp=time.time())
 
     def _on_enable(self, msg):
-        self.enabled = bool(msg.data)
-        if self.enabled and self.det is None:
+        want = bool(msg.data)
+        if want and self.det is None:
             self.get_logger().info("loading YOLO11 ...")
-            self.det = _load_yolo()
+            try:
+                self.det = _load_yolo()
+            except Exception as exc:
+                # BPU/ION allocation failures raise from dnn.load inside the
+                # zoo wrapper; survive them instead of killing the node.
+                self.get_logger().error(
+                    f"YOLO11 load failed ({exc!r}) — staying disabled;"
+                    " likely out of BPU/ION memory: disable other models or"
+                    " enlarge the ION pool")
+                self.enabled = False
+                return
             self.get_logger().info("YOLO11 loaded")
+        elif not want and self.det is not None:
+            self.det = None                        # release BPU/ION memory
+            self.get_logger().info("YOLO11 unloaded")
+        self.enabled = want
 
     def _infer_and_publish(self, name):
         c = self.cams[name]

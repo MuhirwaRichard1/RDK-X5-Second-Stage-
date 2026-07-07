@@ -7,7 +7,7 @@ toggleable)."""
 import math
 import time
 
-from PySide6.QtCore import Qt, Signal
+from PySide6.QtCore import Qt, QTimer, Signal
 from PySide6.QtGui import QColor, QImage, QPainter, QPen
 from PySide6.QtWidgets import (QCheckBox, QGridLayout, QHBoxLayout, QLabel,
                                QSizePolicy, QVBoxLayout, QWidget)
@@ -35,7 +35,9 @@ class VideoWidget(QWidget):
         self._image = None
         self._sectors = None
         self._grid_overlay = None        # last GridOverlay msg (pidnet or depth)
+        self._grid_t = 0.0               # monotonic receipt time of the above
         self._detections = []            # last Detections msg's "boxes" list
+        self._det_t = 0.0
         self._frames = 0
         self._fps = 0.0
         self._fps_t0 = time.monotonic()
@@ -67,6 +69,7 @@ class VideoWidget(QWidget):
 
     def set_grid_overlay(self, msg):
         self._grid_overlay = msg
+        self._grid_t = time.monotonic()
         self.update()
 
     def clear_grid_overlay_if_kind(self, kind):
@@ -81,11 +84,27 @@ class VideoWidget(QWidget):
 
     def set_detections(self, msg):
         self._detections = msg.get("boxes") or []
+        self._det_t = time.monotonic()
         self.update()
 
     def clear_detections(self):
         self._detections = []
         self.update()
+
+    def expire_stale(self, max_age=1.5):
+        """Drop overlays whose stream stopped. Toggle-off clears
+        optimistically, but overlays already in flight (agent reconcile +
+        network) can repaint right after that clear and would then stick
+        forever; this sweep is what actually guarantees they vanish."""
+        now = time.monotonic()
+        stale_grid = self._grid_overlay is not None and now - self._grid_t > max_age
+        stale_det = bool(self._detections) and now - self._det_t > max_age
+        if stale_grid:
+            self._grid_overlay = None
+        if stale_det:
+            self._detections = []
+        if stale_grid or stale_det:
+            self.update()
 
     # ---------------- painting ----------------
 
@@ -199,6 +218,11 @@ class VideoPanel(QWidget):
         self._widgets = {0: self.front, 1: self.left, 2: self.right}
         self._by_name = {"front": self.front, "left": self.left, "right": self.right}
         self._sync_visibility()
+
+        self._expire_timer = QTimer(self)
+        self._expire_timer.timeout.connect(
+            lambda: [w.expire_stale() for w in self._widgets.values()])
+        self._expire_timer.start(500)
 
     def _on_toggle(self, cam, on):
         self._sync_visibility()

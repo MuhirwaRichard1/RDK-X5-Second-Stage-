@@ -67,12 +67,28 @@ class DepthBpu(Node):
         self.stamp = time.time()
 
     def _on_enable(self, msg):
-        self.enabled = bool(msg.data)
-        if self.enabled and self.model is None:
+        want = bool(msg.data)
+        if want and self.model is None:
             self.get_logger().info("loading DepthAnything ...")
-            self.model = dnn.load(MODEL_BIN)[0]
+            try:
+                self.model = dnn.load(MODEL_BIN)[0]
+            except Exception as exc:
+                # dnn.load raises (SystemError) when the BPU's ION pool can't
+                # fit the model — e.g. ~225 MB for ViT-S 518 vs a 320 MB pool
+                # already holding PIDNet + camera pipelines. Stay alive and
+                # disabled instead of taking the whole node down.
+                self.get_logger().error(
+                    f"DepthAnything load failed ({exc!r}) — staying disabled;"
+                    " likely out of BPU/ION memory: disable other models or"
+                    " enlarge the ION pool")
+                self.enabled = False
+                return
             self.size = self.model.inputs[0].properties.shape[2]   # square input
             self.get_logger().info(f"DepthAnything loaded ({self.size}x{self.size})")
+        elif not want and self.model is not None:
+            self.model = None                      # release BPU/ION memory
+            self.get_logger().info("DepthAnything unloaded")
+        self.enabled = want
 
     def _grid_from_depth(self, depth):
         """-> (GRID_ROWS, GRID_COLS) uint8, 0-255 normalized, brighter=closer."""
