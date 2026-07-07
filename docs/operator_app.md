@@ -7,16 +7,25 @@ the robot: it serves the WebSocket API, relays teleop/E-stop into the ROS graph,
 forwards camera frames, and starts/stops the `ros2 launch` stack behind the
 drive modes.
 
+Transport is split GCS-style (like MAVLink ground stations): the WebSocket
+(TCP :8080) is the reliable control plane — hello/welcome, mode switching,
+state, logs — while all latency-critical traffic rides a **UDP fast path on
+:8080/udp**: teleop up; telemetry, sectors and video down. UDP never
+retransmits, so a lost packet costs one 50 ms teleop tick or one video frame
+instead of a TCP head-of-line stall, and video can't build up seconds of
+latency in the kernel's TCP send buffer. If UDP is blocked (firewall/NAT),
+everything falls back to the WebSocket automatically within 3 s.
+
 ```
  PC (Windows/Linux)                     RDK X5 robot
-┌──────────────────┐   WebSocket   ┌─────────────────────────────────────────┐
-│  navbot_console  │◄─────:8080───►│  navbot_agent (root)                    │
-│  PySide6         │  JSON + JPEG  │   ├─ rclpy node: teleop→/cmd_vel,       │
-│  video + HUD     │               │   │   /estop client, telemetry subs     │
-│  joystick/WASD   │               │   ├─ launch manager: ros2 launch per    │
-│  E-stop, modes   │               │   │   mode (own process group)          │
-│  health, logs    │               │   └─ video pump: front JPEG sd/hd,      │
-└──────────────────┘               │       sides YUYV→JPEG                   │
+┌──────────────────┐  WS :8080/tcp ┌─────────────────────────────────────────┐
+│  navbot_console  │◄─────────────►│  navbot_agent (root)                    │
+│  PySide6         │ hello, modes, │   ├─ rclpy node: teleop→/cmd_vel,       │
+│  video + HUD     │ state, logs   │   │   /estop client, telemetry subs     │
+│  joystick/WASD   │  UDP :8080    │   ├─ launch manager: ros2 launch per    │
+│  E-stop, modes   │◄─────────────►│   │   mode (own process group)          │
+│  health, logs    │ teleop↑ telem │   └─ video pump: front JPEG sd/hd,      │
+└──────────────────┘ +video frags↓ │       sides YUYV→JPEG                   │
                                    └─────────────────────────────────────────┘
 ```
 
@@ -77,6 +86,7 @@ video. First client message must be `hello`.
 ```jsonc
 {"v":1,"type":"welcome","proto":1,"agent":"navbot-agent/0.1.0",
  "limits":{"v_max":0.40,"w_max":1.2},"cams":["front","left","right"],
+ "udp":{"port":8080,"token":"9f3a…"},                // UDP fast path offer (v1.1)
  "state":{...}}                                      // + last 200 log lines replayed
 {"type":"state","mode":"manual","mode_status":"starting|active|stopping|error",
  "motors":true,"estop":{"latched":true,"confirmed":true},"detail":"..."}
@@ -99,8 +109,35 @@ video. First client message must be `hello`.
 Backpressure: per-client latest-wins frame slot per camera — a slow WiFi
 client drops frames, never queues them. Measured on-robot: front `sd`
 ~10 fps × 21 KB (~1.7 Mbps), front `hd` ~15 fps × 63 KB (~7.4 Mbps), sides
-5 fps × 8 KB. Latency is reported as WS round-trip only; robot and PC clocks
+5 fps × 8 KB. Latency is reported as link round-trip only; robot and PC clocks
 are never compared.
+
+### UDP fast path (v1.1)
+
+The welcome message offers `udp:{port, token}`; the token is 8 random bytes
+per WS session (hex-encoded). Any datagram carrying it binds the sender's
+address to that session — the client just starts pinging and everything
+reroutes automatically; the binding follows the client if its address changes.
+All integers big-endian; uplink packets start `[magic u8][token 8B]`:
+
+```
+uplink    0x10 PING    [t_client f64]
+          0x11 TELEOP  [seq u32][vx f32][wz f32]      // reordered pkts dropped
+          0x12 ESTOP   [seq u32][engage u8]           // sent x3 + WS copy
+downlink  0x20 PONG    [t_client f64][agent_mono f64]
+          0x21 JSON    [utf-8 JSON]                   // telemetry / sectors
+          0x22 VIDEO   [cam u8][seq u16][mono_ms u32][frag u8][nfrags u8][chunk]
+```
+
+Video frames are split into ≤ 1200-byte fragments; the receiver reassembles
+and drops any frame still incomplete when a newer one starts — one lost
+packet = one dropped frame, never a stall. Rules: agent uses UDP downlink
+for a session while a client datagram arrived < 3 s ago; the console uses
+UDP uplink for teleop while a UDP pong/datagram arrived < 2.5 s ago; state,
+logs and mode commands always stay on the WS. E-stop goes on **both**
+channels (idempotent, agent dedupes by seq). The HUD's "link RTT" row shows
+which transport is live (`· UDP` / `· TCP`). The token binds datagrams to a
+session; it is not authentication — trust model is unchanged (LAN).
 
 ## Running
 
@@ -119,6 +156,7 @@ Headless API test (also works on the robot):
 ```bash
 python3 app/agent/ws_probe.py ws://<robot-ip>:8080 --mode observe --watch 30
 python3 app/agent/ws_probe.py ws://<robot-ip>:8080 --video front --dump-frames /tmp/f
+python3 app/agent/ws_probe.py ws://<robot-ip>:8080 --udp --ping 10 --video front  # fast path
 ```
 
 ## First motors-on checklist (do once, in order)
@@ -139,8 +177,8 @@ drive from the console:
 
 ## Files
 
-- `app/agent/navbot_agent/` — `server.py` (WS sessions/backpressure),
-  `ros_bridge.py` (rclpy node, teleop timer, E-stop reconciler),
+- `app/agent/navbot_agent/` — `server.py` (WS sessions/backpressure + UDP
+  fast path), `ros_bridge.py` (rclpy node, teleop timer, E-stop reconciler),
   `launch_manager.py` (mode state machine, orphan sweeping),
   `video.py`, `health.py`, `protocol.py`, `config.py`
 - `app/desktop/navbot_console/` — `client.py` (QWebSocket + reconnect),

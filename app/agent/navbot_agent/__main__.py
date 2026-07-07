@@ -14,7 +14,7 @@ import signal
 
 from . import __version__, config
 from .app import AgentApp
-from .server import Hub, WsServer
+from .server import Hub, UdpServer, WsServer
 
 log = logging.getLogger("navbot.main")
 
@@ -38,6 +38,16 @@ async def _amain(args):
     for sig in (signal.SIGINT, signal.SIGTERM):
         loop.add_signal_handler(sig, stop.set)
 
+    udp_transport = None
+    try:
+        udp_transport, udp_server = await loop.create_datagram_endpoint(
+            lambda: UdpServer(app), local_addr=(args.host, args.port))
+        app.hub.udp = udp_server
+        app.udp_port = args.port
+        log.info("UDP fast path on udp://%s:%d", args.host, args.port)
+    except OSError as e:
+        log.warning("UDP fast path unavailable (%s) — WS only", e)
+
     tasks = [asyncio.create_task(WsServer(app, args.host, args.port).run()),
              asyncio.create_task(app.telemetry_loop())]
     try:
@@ -59,6 +69,8 @@ async def _amain(args):
     finally:
         for t in tasks:
             t.cancel()
+        if udp_transport:
+            udp_transport.close()
         if launch_mgr:
             await launch_mgr.shutdown()        # never leave a launch orphaned
         if bridge:

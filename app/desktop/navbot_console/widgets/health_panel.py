@@ -25,6 +25,7 @@ class HealthPanel(QWidget):
         super().__init__(parent)
         self._range = QLabel("—")
         self._latency = QLabel("—")
+        self._transport = "TCP"
         self._teleop_age = QLabel("—")
         self._cpu, self._mem, self._bpu = _bar(), _bar(), _bar()
         self._temps = QLabel("—")
@@ -82,4 +83,7 @@ class HealthPanel(QWidget):
             lab.setStyleSheet("" if (v or 0) >= min_ok else "color:#999;")
 
     def on_latency(self, ms):
-        self._latency.setText(f"{ms:.0f} ms")
+        self._latency.setText(f"{ms:.0f} ms · {self._transport}")
+
+    def on_transport(self, name):
+        self._transport = name

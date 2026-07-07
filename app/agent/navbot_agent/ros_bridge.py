@@ -172,7 +172,7 @@ class _AgentNode(Node):
         self._count("/obstacles")
         b = self.b
         if b.app and b.app.hub and b.app.hub.sessions:
-            b._post(b.app.hub.broadcast, protocol.sectors(
+            b._post(b.app.hub.broadcast_fast, protocol.sectors(
                 round(msg.angle_min, 4), round(msg.angle_max, 4),
                 list(msg.status), [round(f, 3) for f in msg.free_fraction]))
 

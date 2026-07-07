@@ -4,17 +4,24 @@ Backpressure design: each session has ONE bounded outbox drained by ONE
 sender task. Text messages drop-oldest when the outbox is full. Video
 frames never queue — they land in a per-session latest-wins slot per
 camera, with a single KICK sentinel in the outbox; a slow client simply
-has its slots overwritten and memory stays bounded at one frame/camera."""
+has its slots overwritten and memory stays bounded at one frame/camera.
+
+UDP fast path: each session gets a random 8-byte token in its welcome; any
+datagram carrying that token binds the sender's address to the session
+(roaming-safe). While datagrams keep arriving, teleop rides UDP uplink and
+telemetry/sectors/video ride UDP downlink — no TCP retransmit stalls, no
+kernel send-buffer queueing. Silence for UDP_ALIVE_S falls back to WS."""
 
 import asyncio
 import json
 import logging
+import secrets
 import time
 
 from websockets.asyncio.server import serve
 from websockets.exceptions import ConnectionClosed
 
-from . import protocol
+from . import config, protocol
 
 log = logging.getLogger("navbot.server")
 
@@ -29,6 +36,16 @@ class ClientSession:
         self.video_slots = {}          # cam_id -> packed frame (latest wins)
         self.video_cams = set()        # camera names this client wants
         self._kick_pending = False
+        self.token = secrets.token_bytes(8)
+        self.udp_addr = None           # last address a valid datagram came from
+        self.last_udp_rx = 0.0
+        self._teleop_seq = 0
+        self._teleop_t = 0.0
+        self._estop_seq = None
+
+    def udp_alive(self, now):
+        return (self.udp_addr is not None
+                and now - self.last_udp_rx < config.UDP_ALIVE_S)
 
     def send_text(self, text):
         try:
@@ -69,17 +86,53 @@ class Hub:
 
     def __init__(self):
         self.sessions = set()
+        self.by_token = {}             # token bytes -> session
+        self.udp = None                # UdpServer, set by main() when bound
+
+    def register(self, session):
+        self.sessions.add(session)
+        self.by_token[session.token] = session
+
+    def unregister(self, session):
+        self.sessions.discard(session)
+        self.by_token.pop(session.token, None)
 
     def broadcast(self, msg):
+        """Reliable path (WS): state, logs, errors."""
         if self.sessions:
             text = json.dumps(msg)
             for s in list(self.sessions):
                 s.send_text(text)
 
-    def broadcast_video(self, cam_name, cam_id, payload):
+    def broadcast_fast(self, msg):
+        """Latest-wins path: telemetry/sectors — UDP when bound, else WS."""
+        text = blob = None
+        now = time.monotonic()
         for s in list(self.sessions):
-            if cam_name in s.video_cams:
-                s.send_video(cam_id, payload)
+            if self.udp and s.udp_alive(now):
+                if blob is None:
+                    blob = protocol.pack_udp_json(msg)
+                self.udp.sendto(blob, s.udp_addr)
+            else:
+                if text is None:
+                    text = json.dumps(msg)
+                s.send_text(text)
+
+    def broadcast_video(self, cam_name, cam_id, seq, mono_ms, jpeg):
+        packed = frags = None
+        now = time.monotonic()
+        for s in list(self.sessions):
+            if cam_name not in s.video_cams:
+                continue
+            if self.udp and s.udp_alive(now):
+                if frags is None:
+                    frags = protocol.fragment_video(cam_id, seq, mono_ms, jpeg)
+                for f in frags:
+                    self.udp.sendto(f, s.udp_addr)
+            else:
+                if packed is None:
+                    packed = protocol.pack_video(cam_id, seq, mono_ms, jpeg)
+                s.send_video(cam_id, packed)
 
     def wants_video(self, cam_name):
         return any(cam_name in s.video_cams for s in self.sessions)
@@ -110,11 +163,11 @@ class WsServer:
 
         session = ClientSession(ws, name=str(msg.get("client", "client")))
         log.info("client connected: %s %s", session.name, peer)
-        await ws.send(json.dumps(self.app.make_welcome()))
+        await ws.send(json.dumps(self.app.make_welcome(session)))
         for entry in self.app.log_ring:
             await ws.send(json.dumps(entry))
 
-        self.app.hub.sessions.add(session)
+        self.app.hub.register(session)
         sender = asyncio.create_task(session.sender())
         try:
             async for raw in ws:
@@ -128,7 +181,7 @@ class WsServer:
         except ConnectionClosed:
             pass
         finally:
-            self.app.hub.sessions.discard(session)
+            self.app.hub.unregister(session)
             sender.cancel()
             self.app.on_client_gone(session)
             log.info("client gone: %s %s", session.name, peer)
@@ -146,3 +199,48 @@ class WsServer:
         elif t == "video":
             self.app.on_video(session, msg)
         # a repeated "hello" is harmless — ignore
+
+
+class UdpServer(asyncio.DatagramProtocol):
+    """UDP fast path. Every valid datagram (re)binds the session's address,
+    so the client may roam APs mid-drive. Unknown tokens are dropped
+    silently — this is session binding, not authentication (same trust
+    model as the WS: anyone on the LAN)."""
+
+    def __init__(self, app):
+        self.app = app
+        self.transport = None
+
+    def connection_made(self, transport):
+        self.transport = transport
+
+    def sendto(self, data, addr):
+        if self.transport:
+            self.transport.sendto(data, addr)
+
+    def datagram_received(self, data, addr):
+        if len(data) < 9:
+            return
+        session = self.app.hub.by_token.get(data[1:9])
+        if session is None:
+            return
+        now = time.monotonic()
+        session.udp_addr = addr
+        session.last_udp_rx = now
+        magic = data[0]
+        if magic == protocol.UDP_PING and len(data) == protocol.UDP_PING_S.size:
+            _, _, t = protocol.UDP_PING_S.unpack(data)
+            self.sendto(protocol.UDP_PONG_S.pack(protocol.UDP_PONG, t, now), addr)
+        elif magic == protocol.UDP_TELEOP and len(data) == protocol.UDP_TELEOP_S.size:
+            _, _, seq, vx, wz = protocol.UDP_TELEOP_S.unpack(data)
+            # UDP reorders: only ever act on the newest command. A >1 s gap
+            # resets the window (client restarted its counter).
+            if seq > session._teleop_seq or now - session._teleop_t > 1.0:
+                session._teleop_seq = seq
+                session._teleop_t = now
+                self.app.on_teleop(vx, wz)
+        elif magic == protocol.UDP_ESTOP and len(data) == protocol.UDP_ESTOP_S.size:
+            _, _, seq, engage = protocol.UDP_ESTOP_S.unpack(data)
+            if seq != session._estop_seq:      # client bursts x3 per press
+                session._estop_seq = seq
+                self.app.on_estop(bool(engage))

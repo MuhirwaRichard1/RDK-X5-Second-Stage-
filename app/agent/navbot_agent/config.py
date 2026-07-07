@@ -6,6 +6,11 @@ import os
 WS_HOST = "0.0.0.0"
 WS_PORT = 8080
 
+# UDP fast path (teleop/telemetry/video), GCS-style. Same port number as the
+# WS — UDP and TCP are separate namespaces, one number to open on firewalls.
+# A session falls back to WS whenever no client datagram arrived recently.
+UDP_ALIVE_S = 3.0
+
 # Command limits — must match config/drive_lut.yaml max_cmd_v and the
 # local_planner's w_max. The agent clamps every teleop command to these.
 V_MAX = 0.40        # m/s

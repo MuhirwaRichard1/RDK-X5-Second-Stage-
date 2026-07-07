@@ -27,6 +27,7 @@ class AgentApp:
         self.mode = "stopped"
         self.mode_status = "active"
         self.mode_detail = ""
+        self.udp_port = None               # set by main() when the UDP socket binds
 
     # ---------------- state / welcome ----------------
 
@@ -42,12 +43,15 @@ class AgentApp:
             "detail": self.mode_detail,
         }
 
-    def make_welcome(self):
-        return protocol.welcome(
+    def make_welcome(self, session=None):
+        msg = protocol.welcome(
             __version__,
             {"v_max": config.V_MAX, "w_max": config.W_MAX},
             sorted(config.CAMERAS, key=config.CAMERAS.get),
             self.state_snapshot())
+        if session is not None and self.udp_port:
+            msg["udp"] = {"port": self.udp_port, "token": session.token.hex()}
+        return msg
 
     def broadcast_state(self):
         if self.hub:
@@ -78,12 +82,17 @@ class AgentApp:
             self.bridge.set_teleop(vx, wz)
 
     def on_estop(self, engage):
+        # Clients send E-stop on UDP *and* WS for reliability — log/broadcast
+        # only on change, but always re-assert toward the bridge.
+        changed = engage != self.estop_latched
         self.estop_latched = engage
-        self.add_log("agent", "warn" if engage else "info",
-                     f"E-stop {'ENGAGED' if engage else 'released'} by operator")
+        if changed:
+            self.add_log("agent", "warn" if engage else "info",
+                         f"E-stop {'ENGAGED' if engage else 'released'} by operator")
         if self.bridge:
             self.bridge.request_estop(engage)
-        self.broadcast_state()
+        if changed:
+            self.broadcast_state()
 
     def on_set_mode(self, mode, session):
         if mode not in config.MODES:
@@ -125,5 +134,5 @@ class AgentApp:
             if range_cm is not None and math.isnan(range_cm):
                 range_cm = None
             age = self.bridge.teleop_age_ms() if self.bridge else None
-            self.hub.broadcast(protocol.telemetry(
+            self.hub.broadcast_fast(protocol.telemetry(
                 rates, range_cm, self.health.sample(), age))

@@ -2,7 +2,11 @@
 
 PySide6 app for driving and monitoring the robot from a Windows or Linux PC on
 the same network. Talks to the robot-side agent
-([app/agent](../agent/README.md)) over WebSocket, port 8080.
+([app/agent](../agent/README.md)) over WebSocket, port 8080, plus a UDP fast
+path on 8080/udp for teleop/telemetry/video (drone-GCS style — lower latency,
+no TCP stalls). The console picks the transport automatically and the HUD's
+"link RTT" row shows which one is live (`· UDP` / `· TCP`); if UDP is blocked
+it silently stays on the WebSocket.
 
 ![panels: video+HUD left, modes/E-stop/joystick/health right, logs bottom]
 
@@ -60,4 +64,8 @@ stops the robot within ~0.5 s (agent staleness + motor dead-man).
   cameras only run while a mode is active.
 - **Laggy video on weak WiFi** — the console uses `sd` quality by default;
   frames are dropped (never queued) so controls stay responsive.
+- **Link shows `· TCP` instead of `· UDP`** — UDP 8080 is blocked between PC
+  and robot (Windows Firewall prompt declined, or agent predates the fast
+  path). Everything still works over the WebSocket, just with more latency
+  under packet loss. Allow Python through the firewall / restart the agent.
 - **"protocol mismatch"** — update whichever side is older; both must speak v1.

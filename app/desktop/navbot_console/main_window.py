@@ -99,6 +99,7 @@ class MainWindow(QMainWindow):
         self.client.stateReceived.connect(self._on_state)
         self.client.telemetryReceived.connect(self.health.on_telemetry)
         self.client.latencyMs.connect(self.health.on_latency)
+        self.client.transportChanged.connect(self.health.on_transport)
         self.client.sectorsReceived.connect(self.video.on_sectors)
         self.client.logReceived.connect(self.log.on_log)
         self.client.errorReceived.connect(

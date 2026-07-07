@@ -13,7 +13,7 @@ import logging
 import cv2
 import numpy as np
 
-from . import config, protocol
+from . import config
 
 log = logging.getLogger("navbot.video")
 
@@ -88,5 +88,4 @@ class VideoPump:
             if jpeg is None:
                 continue
             last_seq = seq
-            self.hub.broadcast_video(cam, cam_id,
-                                     protocol.pack_video(cam_id, seq, mono, jpeg))
+            self.hub.broadcast_video(cam, cam_id, seq, mono, jpeg)
