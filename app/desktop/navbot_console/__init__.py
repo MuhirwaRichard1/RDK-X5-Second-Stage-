@@ -1,3 +1,3 @@
 """navbot_console — PySide6 desktop operator app for the RDK X5 NavBot."""
 
-__version__ = "0.2.4"
+__version__ = "0.3.0"
