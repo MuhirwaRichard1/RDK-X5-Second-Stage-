@@ -52,6 +52,11 @@ class MotorController(Node):
         self.declare_parameter("lut_path", "config/drive_lut.yaml")
         self.declare_parameter("invert_left", False)
         self.declare_parameter("invert_right", False)
+        # This chassis' motor harness is cross-wired (L/R channels swapped AND
+        # polarity reversed), which inverts linear.x but leaves angular.z
+        # correct. Negating v compensates exactly; do NOT "fix" it with
+        # invert_left/right — that would un-invert v but flip turning.
+        self.declare_parameter("invert_linear", True)
 
         g = lambda n: self.get_parameter(n).value
         self.ena, self.enb = g("ena_pin"), g("enb_pin")
@@ -61,6 +66,7 @@ class MotorController(Node):
         self.cmd_timeout = float(g("cmd_timeout"))
         self.invert_left = bool(g("invert_left"))
         self.invert_right = bool(g("invert_right"))
+        self.invert_linear = bool(g("invert_linear"))
         pwm_freq = float(g("pwm_freq_hz"))
 
         # ---- duty<->velocity calibration (encoderless) ----
@@ -138,6 +144,8 @@ class MotorController(Node):
         # dead-man: stale command -> coast to stop
         age = (self.get_clock().now() - self._last_cmd).nanoseconds * 1e-9
         v, w = (0.0, 0.0) if age > self.cmd_timeout else self._target
+        if self.invert_linear:
+            v = -v
 
         # differential-drive inverse kinematics -> wheel linear speeds (m/s)
         v_left = v - w * self.wheel_sep / 2.0
