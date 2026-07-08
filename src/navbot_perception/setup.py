@@ -22,6 +22,7 @@ setup(
             "obstacle_fusion = navbot_perception.obstacle_fusion:main",
             "detection_bpu = navbot_perception.detection_bpu:main",
             "depth_bpu = navbot_perception.depth_bpu:main",
+            "depth_freespace = navbot_perception.depth_freespace:main",
         ],
     },
 )

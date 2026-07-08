@@ -189,8 +189,7 @@ class MainWindow(QMainWindow):
 
     def _on_model_toggled(self, model, enabled):
         self.client.send_model(model, enabled)
-        if not enabled:
-            self.video.clear_model_overlay(model)
+        self.video.set_model_overlay_enabled(model, enabled)
 
     # ---------------- connection ----------------
 

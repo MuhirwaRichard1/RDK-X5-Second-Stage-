@@ -1,13 +1,14 @@
-"""ModelBar — pidnet/yolo11/depthanything overlay toggles. pidnet and
-yolo11 are mutually exclusive (shared BPU); depthanything is independent.
-Buttons disable while the mode stack isn't fully up — the perception nodes
-that own these toggles only exist once a mode is active."""
+"""ModelBar — yolo11/depthanything overlay toggles. depth is now the primary
+obstacle sensor and always runs; its button toggles the depth HUD overlay
+only. yolo11 lazy-loads on the BPU. Buttons disable while the mode stack
+isn't fully up — the perception nodes that own these toggles only exist once
+a mode is active. (The old PIDNET button was removed when depth_freespace
+replaced PIDNet obstacle_fusion.)"""
 
 from PySide6.QtCore import Signal
 from PySide6.QtWidgets import QHBoxLayout, QPushButton, QWidget
 
-_MODELS = ("pidnet", "yolo11", "depthanything")
-_EXCLUSIVE_PAIR = {"pidnet": "yolo11", "yolo11": "pidnet"}
+_MODELS = ("yolo11", "depthanything")
 _STYLE = {True: "background:#00c853;color:black;font-weight:bold;",
          False: ""}
 
@@ -31,13 +32,6 @@ class ModelBar(QWidget):
 
     def _on_click(self, name):
         enabled = self._buttons[name].isChecked()
-        other = _EXCLUSIVE_PAIR.get(name)
-        if enabled and other and self._buttons[other].isChecked():
-            self._buttons[other].setChecked(False)
-            self._buttons[other].setStyleSheet(_STYLE[False])
-            # setChecked() doesn't fire clicked, so tell the robot explicitly
-            # — and before the enable, so it frees BPU memory first
-            self.modelToggled.emit(other, False)
         self._buttons[name].setStyleSheet(_STYLE[enabled])
         self.modelToggled.emit(name, enabled)
 
