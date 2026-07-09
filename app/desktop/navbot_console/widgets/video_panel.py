@@ -38,6 +38,11 @@ class VideoWidget(QWidget):
         self._grid_t = 0.0               # monotonic receipt time of the above
         self._detections = []            # last Detections msg's "boxes" list
         self._det_t = 0.0
+        # Overlay kinds the operator has switched OFF. A late frame already in
+        # flight when the toggle-off happened must not repaint a "cleared"
+        # overlay, so we drop suppressed kinds on arrival until re-enabled.
+        self._suppressed_grid_kinds = set()
+        self._suppress_detections = False
         self._frames = 0
         self._fps = 0.0
         self._fps_t0 = time.monotonic()
@@ -68,26 +73,38 @@ class VideoWidget(QWidget):
         self.update()
 
     def set_grid_overlay(self, msg):
+        if msg.get("kind") in self._suppressed_grid_kinds:
+            return                       # toggled off; ignore late in-flight frame
         self._grid_overlay = msg
         self._grid_t = time.monotonic()
         self.update()
 
-    def clear_grid_overlay_if_kind(self, kind):
-        """Only clears if the currently-shown grid is that kind — keeps a
-        disable from wiping a different overlay kind that happens to be
-        occupying the same slot."""
+    def suppress_grid_kind(self, kind):
+        """Operator disabled this overlay: clear it now AND block any frame of
+        this kind still in flight, until re-enabled. Race-free (unlike a bare
+        clear that a late frame could undo)."""
+        self._suppressed_grid_kinds.add(kind)
         if self._grid_overlay is not None and self._grid_overlay.get("kind") == kind:
             self._grid_overlay = None
             self.update()
 
+    def unsuppress_grid_kind(self, kind):
+        self._suppressed_grid_kinds.discard(kind)
+
     def set_detections(self, msg):
+        if self._suppress_detections:
+            return                       # toggled off; ignore late in-flight frame
         self._detections = msg.get("boxes") or []
         self._det_t = time.monotonic()
         self.update()
 
-    def clear_detections(self):
+    def suppress_detections(self):
+        self._suppress_detections = True
         self._detections = []
         self.update()
+
+    def unsuppress_detections(self):
+        self._suppress_detections = False
 
     def expire_stale(self, max_age=1.5):
         """Drop overlays whose stream stopped. Toggle-off clears
@@ -257,15 +274,18 @@ class VideoPanel(QWidget):
         if w:
             w.set_detections(msg)
 
-    def clear_model_overlay(self, model):
-        """Called the moment the operator disables a toggle, so a stale
-        overlay doesn't linger on screen waiting for the robot to stop
-        publishing."""
+    def set_model_overlay_enabled(self, model, enabled):
+        """Called on every model toggle. On disable, suppress the overlay so
+        it clears immediately and can't be repainted by an in-flight frame;
+        on enable, lift the suppression so fresh frames show again."""
         if model == "yolo11":
             for w in self._widgets.values():
-                w.clear_detections()
+                (w.unsuppress_detections if enabled else w.suppress_detections)()
         elif model == "depthanything":
-            self.front.clear_grid_overlay_if_kind(_KIND_DEPTH)
+            if enabled:
+                self.front.unsuppress_grid_kind(_KIND_DEPTH)
+            else:
+                self.front.suppress_grid_kind(_KIND_DEPTH)
 
     def clear_all(self):
         for w in self._widgets.values():

@@ -6,13 +6,15 @@ publisher. obstacle_fusion stays up for the operator's sector HUD, and
 every command still passes through safety_gate (TF-Luna clamp + /estop).
 
     cameras (three_cam.launch.py)
-        -> obstacle_fusion  (PIDNet on BPU, 3 cams -> /obstacles, HUD only)
+        -> depth_freespace  (Depth Anything vits392 on BPU, front cam ->
+                             /obstacles via floor-break geometry; PRIMARY
+                             obstacle sensor, replaces PIDNet obstacle_fusion
+                             which read indoor floors poorly)
     operator /cmd_vel
-        -> safety_gate      (/cmd_vel + TF-Luna + /estop -> /cmd_vel_safe)
+        -> safety_gate      (/cmd_vel + TF-Luna + /obstacles + /estop ->
+                             /cmd_vel_safe)
         -> motor_controller (only when motors:=true)
         -> detection_bpu    (YOLO11 on BPU, idle until /perception/yolo11_enable)
-        -> depth_bpu        (Depth Anything on BPU, front cam only, idle
-                              until /perception/depth_enable)
 
     ros2 launch navbot_bringup manual.launch.py               # dry
     ros2 launch navbot_bringup manual.launch.py motors:=true  # drives!
@@ -46,8 +48,8 @@ def generate_launch_description():
         cameras,
         Node(package="navbot_slam", executable="imu_driver",
              name="imu_driver", output="screen"),
-        Node(package="navbot_perception", executable="obstacle_fusion",
-             name="obstacle_fusion", output="screen"),
+        Node(package="navbot_perception", executable="depth_freespace",
+             name="depth_freespace", output="screen"),
         Node(package="navbot_drive", executable="safety_gate",
              name="safety_gate", output="screen"),
         Node(package="navbot_drive", executable="motor_controller",
@@ -55,6 +57,4 @@ def generate_launch_description():
              condition=IfCondition(LaunchConfiguration("motors"))),
         Node(package="navbot_perception", executable="detection_bpu",
              name="detection_bpu", output="screen"),
-        Node(package="navbot_perception", executable="depth_bpu",
-             name="depth_bpu", output="screen"),
     ])
