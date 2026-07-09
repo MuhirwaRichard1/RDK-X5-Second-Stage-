@@ -32,7 +32,7 @@ _ACTIVATE_STYLE = {
 }
 _AVOID_LAMP = {
     True:  "background:#00c853;color:black;border-radius:9px;padding:4px 10px;font-weight:bold;",
-    False: "background:#444;color:#aaa;border-radius:9px;padding:4px 10px;",
+    False: "background:#c62828;color:white;border-radius:9px;padding:4px 10px;font-weight:bold;",
 }
 
 
@@ -53,7 +53,7 @@ class MainWindow(QMainWindow):
         self._activate_btn = QPushButton("Activate Robot")
         self._activate_btn.setMinimumHeight(44)
         self._activate_btn.setStyleSheet(_ACTIVATE_STYLE["idle"])
-        self._avoid_lamp = QLabel("OBSTACLE AVOIDANCE: OFF")
+        self._avoid_lamp = QLabel("OBSTACLE AVOIDANCE OFF")
         self._avoid_lamp.setStyleSheet(_AVOID_LAMP[False])
         self.mode_bar = ModeBar()
         self.model_bar = ModelBar()
@@ -176,7 +176,7 @@ class MainWindow(QMainWindow):
         status = self._state.get("mode_status")
         if mode == "manual" and status == "active":
             self._activate_btn.setEnabled(True)
-            self._activate_btn.setText("Robot Active  (obstacle avoidance ON)")
+            self._activate_btn.setText("Robot Active")
             self._activate_btn.setStyleSheet(_ACTIVATE_STYLE["active"])
         elif status in ("starting", "stopping"):
             self._activate_btn.setEnabled(False)
@@ -219,7 +219,7 @@ class MainWindow(QMainWindow):
             self.teleop.set_enabled(False)
             self._pending_activate = False
             self._state = {}
-            self._avoid_lamp.setText("OBSTACLE AVOIDANCE: OFF")
+            self._avoid_lamp.setText("OBSTACLE AVOIDANCE OFF")
             self._avoid_lamp.setStyleSheet(_AVOID_LAMP[False])
             self._update_activate_btn()
 
@@ -249,10 +249,9 @@ class MainWindow(QMainWindow):
                    and state.get("mode_status") == "active"
                    and not es.get("latched"))
         self.teleop.set_enabled(driving)
-        avoidance_on = (state.get("mode") not in (None, "stopped")
-                        and state.get("mode_status") == "active")
+        avoidance_on = bool(state.get("models", {}).get("obstacle_avoidance"))
         self._avoid_lamp.setText(
-            "OBSTACLE AVOIDANCE: ON" if avoidance_on else "OBSTACLE AVOIDANCE: OFF")
+            "OBSTACLE AVOIDANCE ON" if avoidance_on else "OBSTACLE AVOIDANCE OFF")
         self._avoid_lamp.setStyleSheet(_AVOID_LAMP[avoidance_on])
         self._update_activate_btn()
 
