@@ -51,7 +51,7 @@ class RosBridge:
         self.estop_intent = None        # operator latch (None = untouched)
         self.teleop_enabled = False     # set by launch manager (manual mode)
         self._teleop = None             # (vx, wz, t_mono)
-        self.model_intent = {m: False for m in config.MODELS}  # operator toggle
+        self.model_intent = dict(config.MODEL_DEFAULTS)  # operator toggle
         self._counters = {t: 0 for t in config.RATE_TOPICS}
         self._rates_taken = time.monotonic()
         self._rates_last = {t: 0 for t in config.RATE_TOPICS}

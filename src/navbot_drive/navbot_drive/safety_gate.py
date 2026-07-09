@@ -20,6 +20,10 @@ Three independent protections on top of whatever the planner commands:
     `obstacles_stale_s` — otherwise forward is clamped to 0 (UNKNOWN sectors
     count as blocked, per the Sectors contract). This makes manual teleop
     respect the PIDNet free-space estimate, not just the operator's stick.
+    Defaults on (the `visual_stop` param); the operator console can flip it
+    live via a latched Bool on /perception/obstacle_avoidance_enable. The
+    TF-Luna check above is NOT gated by this — it's a physical backstop
+    that always stays on.
   * E-stop: while engaged every command is zeroed.
 
 motor_controller's own dead-man (cmd_timeout) remains the last line: if this
@@ -82,6 +86,8 @@ class SafetyGate(Node):
         self.pub_blocked = self.create_publisher(Bool, "/forward_blocked", latched)
         self.create_subscription(Twist, "/cmd_vel", self._on_cmd, 10)
         self.create_subscription(Sectors, "/obstacles", self._on_obstacles, 10)
+        self.create_subscription(Bool, "/perception/obstacle_avoidance_enable",
+                                 self._on_visual_stop_enable, latched)
         self.create_service(SetBool, "/estop", self._on_estop)
         self.create_timer(1.0 / g("lidar_rate_hz"), self._read_lidar)
         self.get_logger().info(
@@ -125,6 +131,12 @@ class SafetyGate(Node):
     def _on_obstacles(self, msg):
         self.sectors = msg
         self.sectors_t = time.monotonic()
+
+    def _on_visual_stop_enable(self, msg):
+        self.visual_stop = bool(msg.data)
+        self.get_logger().info(
+            "obstacle avoidance (visual stop) "
+            + ("enabled" if self.visual_stop else "DISABLED") + " by operator")
 
     def _lidar_unsafe(self):
         return self.lidar_cm is None or self.lidar_cm < self.stop_cm

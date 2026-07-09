@@ -54,14 +54,16 @@ LAUNCH_STOP_SIGINT_S = 12.0   # grace after SIGINT before SIGTERM
 LAUNCH_STOP_SIGTERM_S = 3.0   # grace after SIGTERM before SIGKILL
 MODE_ACTIVE_TIMEOUT_S = 25.0  # /obstacles (or /estop service) must appear by then
 
-# Perception model overlays. pidnet/yolo11 are mutually exclusive (shared
-# BPU); depthanything (front camera only) is independent of both.
-MODELS = ("pidnet", "yolo11", "depthanything")
+# Operator-togglable models/features. obstacle_avoidance gates safety_gate's
+# visual (PIDNet-derived) forward-block and defaults ON; the perception
+# overlays (yolo11, depthanything) default OFF — opt-in, cost BPU/bandwidth.
+MODELS = ("obstacle_avoidance", "yolo11", "depthanything")
 MODEL_ENABLE_TOPIC = {
-    "pidnet": "/perception/pidnet_overlay_enable",
+    "obstacle_avoidance": "/perception/obstacle_avoidance_enable",
     "yolo11": "/perception/yolo11_enable",
     "depthanything": "/perception/depth_enable",
 }
+MODEL_DEFAULTS = {"obstacle_avoidance": True, "yolo11": False, "depthanything": False}
 
 # Cameras: name -> binary-protocol id. Front is CompressedImage (JPEG),
 # sides are raw YUYV 320x240 that the agent JPEG-encodes.

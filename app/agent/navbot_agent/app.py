@@ -28,7 +28,7 @@ class AgentApp:
         self.mode_status = "active"
         self.mode_detail = ""
         self.udp_port = None               # set by main() when the UDP socket binds
-        self.active_models = {m: False for m in config.MODELS}
+        self.active_models = dict(config.MODEL_DEFAULTS)
 
     # ---------------- state / welcome ----------------
 
@@ -113,20 +113,11 @@ class AgentApp:
         if model not in config.MODELS:
             session.send_json(protocol.error(f"unknown model: {model}"))
             return
-        changed = {}
-        if enable and model in ("pidnet", "yolo11"):
-            other = "yolo11" if model == "pidnet" else "pidnet"
-            if self.active_models[other]:
-                self.active_models[other] = False
-                changed[other] = False
-        if self.active_models[model] != enable:
-            self.active_models[model] = enable
-            changed[model] = enable
-        if not changed:
+        if self.active_models[model] == enable:
             return
+        self.active_models[model] = enable
         if self.bridge:
-            for m, v in changed.items():
-                self.bridge.set_model_enable(m, v)
+            self.bridge.set_model_enable(model, enable)
         self.broadcast_state()
 
     def on_video(self, session, msg):

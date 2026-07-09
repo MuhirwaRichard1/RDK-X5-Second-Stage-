@@ -16,7 +16,7 @@ _SECTOR_COLORS = {0: QColor(140, 140, 140, 110),   # UNKNOWN
                   1: QColor(0, 200, 80, 90),       # FREE
                   2: QColor(230, 40, 40, 130)}     # BLOCKED
 
-_KIND_PIDNET, _KIND_DEPTH = 0, 1
+_KIND_DEPTH = 1
 _DETECTION_COLOR = QColor(255, 210, 0)
 
 
@@ -34,7 +34,7 @@ class VideoWidget(QWidget):
         self._hud = hud
         self._image = None
         self._sectors = None
-        self._grid_overlay = None        # last GridOverlay msg (pidnet or depth)
+        self._grid_overlay = None        # last GridOverlay msg (depth, front only)
         self._grid_t = 0.0               # monotonic receipt time of the above
         self._detections = []            # last Detections msg's "boxes" list
         self._det_t = 0.0
@@ -73,11 +73,9 @@ class VideoWidget(QWidget):
         self.update()
 
     def clear_grid_overlay_if_kind(self, kind):
-        """Only clears if the currently-shown grid is that kind — front can
-        carry pidnet and depth grids in the same slot since they're never
-        both fresh at once from one toggle's perspective; this avoids a
-        depthanything disable wiping a still-active pidnet overlay or
-        vice versa."""
+        """Only clears if the currently-shown grid is that kind — keeps a
+        disable from wiping a different overlay kind that happens to be
+        occupying the same slot."""
         if self._grid_overlay is not None and self._grid_overlay.get("kind") == kind:
             self._grid_overlay = None
             self.update()
@@ -266,9 +264,6 @@ class VideoPanel(QWidget):
         if model == "yolo11":
             for w in self._widgets.values():
                 w.clear_detections()
-        elif model == "pidnet":
-            for w in self._widgets.values():
-                w.clear_grid_overlay_if_kind(_KIND_PIDNET)
         elif model == "depthanything":
             self.front.clear_grid_overlay_if_kind(_KIND_DEPTH)
 
