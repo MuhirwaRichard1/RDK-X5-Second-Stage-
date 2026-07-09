@@ -125,7 +125,7 @@ class VideoWidget(QWidget):
 
     def paintEvent(self, _ev):
         p = QPainter(self)
-        p.fillRect(self.rect(), QColor(15, 15, 15))
+        p.fillRect(self.rect(), QColor(255, 255, 255))
         rect = self.rect()
         if self._image:
             scaled = self._image.scaled(rect.size(), Qt.KeepAspectRatio,
@@ -142,7 +142,7 @@ class VideoWidget(QWidget):
             self._draw_grid_overlay(p)
         if self._detections:
             self._draw_detections(p)
-        p.setPen(QColor(255, 255, 255))
+        p.setPen(QColor(0, 0, 0))
         p.drawText(8, 18, f"{self._title}  {self._fps:.0f} fps")
 
     def _draw_grid_overlay(self, p):
@@ -195,7 +195,7 @@ class VideoWidget(QWidget):
             span_qt = int(math.degrees(width) * 16)
             p.setBrush(_SECTOR_COLORS.get(st, _SECTOR_COLORS[0]))
             p.drawPie(*box, start_qt, span_qt)
-        p.setPen(QPen(QColor(255, 255, 255, 150), 1))
+        p.setPen(QPen(QColor(0, 0, 0, 180), 1))
         p.setBrush(Qt.NoBrush)
         p.drawEllipse(int(cx - 4), int(cy - 4), 8, 8)
 
