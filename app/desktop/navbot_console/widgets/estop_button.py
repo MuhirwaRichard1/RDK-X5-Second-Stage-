@@ -20,7 +20,7 @@ class EStopButton(QPushButton):
 
     def __init__(self, parent=None):
         super().__init__("E-STOP", parent)
-        self.setMinimumHeight(80)
+        self.setMinimumHeight(100)
         self._latched = False
         self._confirmed = None
         self.setStyleSheet(_STYLE_ARMED)
