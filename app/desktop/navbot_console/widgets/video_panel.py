@@ -128,7 +128,11 @@ class VideoWidget(QWidget):
         p.fillRect(self.rect(), QColor(255, 255, 255))
         rect = self.rect()
         if self._image:
-            scaled = self._image.scaled(rect.size(), Qt.KeepAspectRatio,
+            # Fill the whole widget and crop the overflow (rather than
+            # letterboxing) so every camera's picture reads as the same
+            # size regardless of its native aspect ratio (front is 16:9,
+            # sides are 4:3) — Qt clips drawImage to the widget bounds.
+            scaled = self._image.scaled(rect.size(), Qt.KeepAspectRatioByExpanding,
                                         Qt.SmoothTransformation)
             x = (rect.width() - scaled.width()) // 2
             y = (rect.height() - scaled.height()) // 2
