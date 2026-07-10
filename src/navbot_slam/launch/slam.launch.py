@@ -96,7 +96,10 @@ def generate_launch_description():
             "rtabmap_viz": "false",
             "rviz": "false",
             "database_path": "/home/sunrise/.ros/rtabmap.db",
-            "rtabmap_args": "--delete_db_on_start",
+            # Persistent map: the db survives across launches (reopened +
+            # continued). Delete rtabmap.db by hand for a fresh single-session
+            # build; leave it to add a session / localize against the map.
+            "rtabmap_args": "",
             "use_sim_time": use_sim_time,
         }.items())
 

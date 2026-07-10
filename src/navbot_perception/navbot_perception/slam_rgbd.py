@@ -28,6 +28,7 @@ BPU note: this loads its own Depth Anything instance. Do NOT run `depth_bpu`
 launched by the SLAM bringup, which drops the console depth grid while mapping.
 """
 
+import array
 import time
 
 import cv2
@@ -189,7 +190,11 @@ class SlamRgbd(Node):
         rgb.height, rgb.width = self.h, self.w
         rgb.encoding = "bgr8"
         rgb.step = self.w * 3
-        rgb.data = rect.tobytes()
+        # Wrap in array('B',...): assigning raw bytes to a uint8[] ROS field
+        # hits rclpy's per-element validation (~0.9 s for a 640x480x3 image);
+        # array('B') takes rclpy's fast C path (~1 ms). This is THE throughput
+        # fix — without it a whole tick is ~2.5 s (0.4 Hz) instead of ~0.4 s.
+        rgb.data = array.array('B', rect.tobytes())
         self.pub_rgb.publish(rgb)
 
         dep = Image()
@@ -198,7 +203,7 @@ class SlamRgbd(Node):
         dep.height, dep.width = self.h, self.w
         dep.encoding = "32FC1"
         dep.step = self.w * 4
-        dep.data = depth.tobytes()
+        dep.data = array.array('B', depth.tobytes())     # fast path — see rgb above
         self.pub_depth.publish(dep)
 
 
