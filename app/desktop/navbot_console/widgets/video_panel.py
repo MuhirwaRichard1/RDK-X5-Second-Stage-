@@ -233,6 +233,9 @@ class VideoPanel(QWidget):
 
         lay = QVBoxLayout(self)
         lay.addLayout(toggles)
+        lay.setAlignment(toggles, Qt.AlignTop)  # pin the checkbox row to the
+        # top even when the grid below is fully collapsed (all cams off) —
+        # otherwise Qt centers it vertically once the grid item is "empty".
         lay.addLayout(self._grid, 1)   # grid fills whatever space is left
         self._widgets = {0: self.front, 1: self.left, 2: self.right}
         self._by_name = {"front": self.front, "left": self.left, "right": self.right}
