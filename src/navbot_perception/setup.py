@@ -23,6 +23,7 @@ setup(
             "detection_bpu = navbot_perception.detection_bpu:main",
             "depth_bpu = navbot_perception.depth_bpu:main",
             "depth_freespace = navbot_perception.depth_freespace:main",
+            "slam_rgbd = navbot_perception.slam_rgbd:main",
         ],
     },
 )

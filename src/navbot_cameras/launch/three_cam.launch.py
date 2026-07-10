@@ -82,18 +82,26 @@ def generate_launch_description():
             os.path.join(get_package_share_directory("hobot_shm"),
                          "launch/hobot_shm.launch.py")))
 
-    # intrinsics from scripts/11_front_cam_calib.py; empty until calibrated
-    front_calib = "/home/sunrise/rdk-x5-navbot/config/camera_front.yaml"
-    if not os.path.exists(front_calib):
-        front_calib = ""
+    # ROS camera_info files generated from Camera_calibration/*.yaml by
+    # scripts/gen_camera_info.py. All three cameras were calibrated at 640x480;
+    # front now streams 640x480 so its intrinsics apply directly, and the sides
+    # stream 320x240 with x0.5-scaled intrinsics (see the generator). Empty
+    # string => hobot_usb_cam publishes an uncalibrated camera_info.
+    _CFG = "/home/sunrise/rdk-x5-navbot/config"
+
+    def _calib(name):
+        p = os.path.join(_CFG, name + ".yaml")
+        return p if os.path.exists(p) else ""
 
     return LaunchDescription([
         front_dev, left_dev, right_dev,
         shm,
+        # front dropped 1280x720 -> 640x480 to match its calibration (and free
+        # USB bandwidth); the 0bdc:8088 advertises 640x480 MJPEG @ 30 fps.
         _cam("cam_front", LaunchConfiguration("front_device"),
-             1280, 720, 30, "mjpeg", front_calib),
+             640, 480, 30, "mjpeg", _calib("camera_front")),
         _cam("cam_left", LaunchConfiguration("left_device"),
-             320, 240, 30, "yuyv"),
+             320, 240, 30, "yuyv", _calib("camera_left")),
         _cam("cam_right", LaunchConfiguration("right_device"),
-             320, 240, 30, "yuyv"),
+             320, 240, 30, "yuyv", _calib("camera_right")),
     ])

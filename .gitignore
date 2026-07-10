@@ -7,5 +7,9 @@ __pycache__/
 *.pyc
 *.bag
 *.db3
+bags/
 models/*.bin
 !models/.gitkeep
+
+# Claude Code local settings (personal, not shared)
+.claude/settings.local.json
