@@ -248,12 +248,14 @@ class VideoPanel(QWidget):
         self.cameraToggled.emit(cam, on)
 
     def _sync_visibility(self):
+        front_on = self._boxes["front"].isChecked()
         left_on = self._boxes["left"].isChecked()
         right_on = self._boxes["right"].isChecked()
+        self.front.setVisible(front_on)
         self.left.setVisible(left_on)
         self.right.setVisible(right_on)
         # hidden columns get no stretch, so the visible ones share the space
-        self._grid.setColumnStretch(0, 1)
+        self._grid.setColumnStretch(0, 1 if front_on else 0)
         self._grid.setColumnStretch(1, 1 if left_on else 0)
         self._grid.setColumnStretch(2, 1 if right_on else 0)
 
