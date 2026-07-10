@@ -23,6 +23,18 @@ obstacle's nearness (a physical distance proxy, robust to camera tilt); a
 sector whose nearest obstacle exceeds `near_block` is BLOCKED. Columns clear
 to the horizon read far (free). Also republishes the depth HUD grid so the
 console depth overlay keeps working.
+
+Path-ahead band (`path_bottom_frac`): the front camera sits very low, so the
+bottom of the frame is a near-field FLOOR APRON the robot is effectively
+already standing on, not steering-relevant space — and at night it is where
+floor glare/reflections manufacture false "near" breaks. That zone is the
+TF-Luna's jurisdiction (safety_gate clamps forward below stop_cm as an always-
+on physical backstop, and the beam sits beneath this camera). So we still walk
+the floor trend THROUGH the apron (real floor = a rock-solid reference for the
+cumulative-min), but only DECLARE an obstacle when the break lands in the upper
+path-ahead band [horizon_frac .. path_bottom_frac]. Raise path_bottom_frac to
+watch more of the floor; lower it to trust the TF-Luna for more of the near
+field. Constraint: horizon_frac < path_bottom_frac < feet_frac.
 """
 
 import time
@@ -59,6 +71,7 @@ class DepthFreespace(Node):
         self.declare_parameter("floor_tol", 0.15)    # inv-depth rise = obstacle
         self.declare_parameter("near_block", 2.2)     # inv-depth >= this => BLOCKED
         self.declare_parameter("horizon_frac", 0.30)  # ignore top (walls/ceiling)
+        self.declare_parameter("path_bottom_frac", 0.55)  # ignore below (floor apron/TF-Luna zone)
         self.declare_parameter("feet_frac", 0.90)     # bottom = floor-at-feet seed
         g = lambda n: self.get_parameter(n).value  # noqa: E731
 
@@ -71,6 +84,7 @@ class DepthFreespace(Node):
         self.floor_tol = float(g("floor_tol"))
         self.near_block = float(g("near_block"))
         self.horizon_frac = float(g("horizon_frac"))
+        self.path_bottom_frac = float(g("path_bottom_frac"))
         self.feet_frac = float(g("feet_frac"))
 
         self.frame = None
@@ -106,7 +120,9 @@ class DepthFreespace(Node):
         self.get_logger().info(
             f"depth_freespace up: {self.n} sectors over "
             f"[{np.degrees(self.a0):.0f}..{np.degrees(self.a1):.0f}]deg, "
-            f"near_block={self.near_block}")
+            f"near_block={self.near_block}, path band "
+            f"[{self.horizon_frac:.2f}..{self.path_bottom_frac:.2f}] "
+            f"(apron below {self.path_bottom_frac:.2f} -> TF-Luna)")
 
     def _store(self, msg):
         self.frame = msg
@@ -130,6 +146,15 @@ class DepthFreespace(Node):
         stacked = np.concatenate([seed[None, :], rows_up], axis=0)
         running_before = np.minimum.accumulate(stacked, axis=0)[:-1]  # min below row
         break_mask = rows_up > running_before + self.floor_tol
+        # Only DECLARE obstacles in the upper path-ahead band: silence breaks in
+        # the near-field floor apron (rows below path_bottom), which the TF-Luna
+        # backstop owns and where night floor-glare fabricates false breaks. The
+        # floor trend above was still tracked through the apron. rows_up[k] is
+        # image row feet-1-k, so apron rows are the first k_min entries.
+        path_bottom = int(h * self.path_bottom_frac)
+        k_min = min(max(0, feet - 1 - path_bottom), break_mask.shape[0])
+        if k_min:
+            break_mask[:k_min] = False
         near = np.zeros(w, dtype=np.float32)
         any_break = break_mask.any(axis=0)
         first_k = break_mask.argmax(axis=0)                 # first break per column
