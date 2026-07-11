@@ -21,6 +21,7 @@ setup(
         "console_scripts": [
             "motor_controller = navbot_drive.motor_controller:main",
             "safety_gate = navbot_drive.safety_gate:main",
+            "dr_odom = navbot_drive.dr_odom:main",
         ],
     },
 )

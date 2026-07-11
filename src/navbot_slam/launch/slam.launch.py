@@ -23,8 +23,9 @@ the real lever arm/orientation (vio_slam_plan Phase 1.3) and override via args.
 
 from launch import LaunchDescription
 from launch.actions import DeclareLaunchArgument, IncludeLaunchDescription
+from launch.conditions import IfCondition
 from launch.launch_description_sources import PythonLaunchDescriptionSource
-from launch.substitutions import LaunchConfiguration
+from launch.substitutions import LaunchConfiguration, PythonExpression
 from launch_ros.actions import Node
 from ament_index_python.packages import get_package_share_directory
 import os
@@ -32,10 +33,17 @@ import os
 
 def generate_launch_description():
     use_sim_time = LaunchConfiguration("use_sim_time")
+    odom_mode = LaunchConfiguration("odom_mode")
 
     args = [
         DeclareLaunchArgument("use_sim_time", default_value="false",
                               description="true when replaying a bag with --clock"),
+        # dr = dead-reckoning backbone (dr_odom: cmd_vel_safe + IMU gyro; never
+        # drops out, drift corrected by loop closures). visual = rgbd_odometry
+        # (accurate when it tracks, but dropouts on feature-poor views fragment
+        # the graph — see 2026-07-11 loop2 builds).
+        DeclareLaunchArgument("odom_mode", default_value="dr",
+                              description="dr | visual"),
         # rough base_link -> cam_front (optical) mount — MEASURE & override
         DeclareLaunchArgument("cam_x", default_value="0.10"),
         DeclareLaunchArgument("cam_z", default_value="0.15"),
@@ -47,6 +55,12 @@ def generate_launch_description():
     slam_rgbd = Node(
         package="navbot_perception", executable="slam_rgbd", name="slam_rgbd",
         parameters=[st], output="screen")
+
+    # --- dead-reckoning odometry backbone (odom_mode:=dr) --------------------
+    dr_odom = Node(
+        package="navbot_drive", executable="dr_odom", name="dr_odom",
+        parameters=[st], output="screen",
+        condition=IfCondition(PythonExpression(["'", odom_mode, "' == 'dr'"])))
 
     # --- IMU orientation filter: /imu/data -> /imu/data_filtered ------------
     madgwick = Node(
@@ -85,6 +99,12 @@ def generate_launch_description():
             "depth_topic": "/slam_rgbd/depth/image_rect",
             "camera_info_topic": "/slam_rgbd/rgb/camera_info",
             "frame_id": "base_link",
+            # dr mode: rgbd_odometry is not started; rtabmap consumes dr_odom's
+            # /odom_dr topic + TF and does mapping/closures only.
+            "visual_odometry": PythonExpression(
+                ["'true' if '", odom_mode, "' == 'visual' else 'false'"]),
+            "odom_topic": PythonExpression(
+                ["'/odom_dr' if '", odom_mode, "' == 'dr' else 'odom'"]),
             "imu_topic": "/imu/data_filtered",
             "wait_imu_to_init": "true",
             "approx_sync": "true",
@@ -99,8 +119,24 @@ def generate_launch_description():
             # Persistent map: the db survives across launches (reopened +
             # continued). Delete rtabmap.db by hand for a fresh single-session
             # build; leave it to add a session / localize against the map.
-            "rtabmap_args": "",
+            # Force3DoF: wheeled robot on flat ground — constrain z/roll/pitch
+            # so registration only solves x/y/yaw (synthesized depth is too
+            # noisy for full 6DoF).
+            # RoiRatios (left,right,top,bottom): ignore the bottom 40% of the
+            # image for loop-closure features — the glossy tile floor mirrors
+            # the scene and Depth Anything assigns reflections far depth, so
+            # floor features carry garbage geometry. Measured on loop2: masking
+            # DOUBLED accepted closures (12->22). Applied to rtabmap only —
+            # masking odometry too caused more resets (55 vs 44: feature-poor
+            # frames need every feature they can get).
+            "rtabmap_args": "--Reg/Force3DoF true "
+                            "--Vis/RoiRatios 0,0,0,0.4 --Kp/RoiRatios 0,0,0,0.4",
+            # ResetCountdown: F2M odometry that loses its local map stays lost
+            # forever (observed: 160 s of quality=0 on loop1); auto-reset after
+            # 5 consecutive failures so rtabmap can stitch fragments instead.
+            "odom_args": "--Odom/ResetCountdown 5",
             "use_sim_time": use_sim_time,
         }.items())
 
-    return LaunchDescription(args + [slam_rgbd, madgwick, tf_cam, tf_imu, rtabmap])
+    return LaunchDescription(
+        args + [slam_rgbd, dr_odom, madgwick, tf_cam, tf_imu, rtabmap])

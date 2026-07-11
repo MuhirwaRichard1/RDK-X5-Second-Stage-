@@ -18,9 +18,14 @@ Metric scaling (single-point, per the vio_slam_plan): Depth Anything outputs an
 affine-invariant inverse depth `raw` (larger = closer). Assuming the shift is
 negligible, metric depth is  d(u,v) = range * raw_center / raw(u,v), which pins
 the boresight pixel to the measured TF-Luna range and propagates relative
-geometry outward. This is the weak link of Track A (crude far-field scale, per-
-frame scale jitter) — mitigated by EMA-smoothing the range anchor and holding
-the last good value across TF-Luna dropouts. Depth beyond the TF-Luna window
+geometry outward. The range is the TF-Luna sample nearest the FRAME's stamp —
+never an EMA: per-frame model-gain jitter cancels exactly in raw_center/raw,
+and during turns both sensors track the same new object, so instantaneous
+pairing stays coherent while any smoothing lags and corrupts the scale (seen
+as 2x depth error for several frames after each scene change). Frames whose
+nearest range sample is older than range_max_age are skipped rather than
+published with a stale anchor. This remains the weak link of Track A (crude
+far-field scale). Depth beyond the TF-Luna window
 [min_range, max_range] is emitted as 0 (RTAB-Map treats 0 as "no measurement").
 
 BPU note: this loads its own Depth Anything instance. Do NOT run `depth_bpu`
@@ -30,6 +35,7 @@ launched by the SLAM bringup, which drops the console depth grid while mapping.
 
 import array
 import time
+from collections import deque
 
 import cv2
 import numpy as np
@@ -66,19 +72,21 @@ class SlamRgbd(Node):
         self.declare_parameter("boresight_x", -1)   # -1 => image centre
         self.declare_parameter("boresight_y", -1)
         self.declare_parameter("boresight_win", 6)
-        self.declare_parameter("range_ema", 0.4)    # EMA weight on new range
+        # max age (s) of the nearest TF-Luna sample before a frame is skipped
+        self.declare_parameter("range_max_age", 2.0)
         g = lambda n: self.get_parameter(n).value  # noqa: E731
 
         self.frame_id = g("frame_id")
         self.bwin = int(g("boresight_win"))
-        self.range_ema = float(g("range_ema"))
+        self.range_max_age = float(g("range_max_age"))
 
         self._load_rectify_maps(g("calib_file"))
         self._load_model(g("model_bin"))
 
         self.frame = None
         self.stamp = 0.0
-        self.range_m = float("nan")     # smoothed TF-Luna range (metres)
+        self.ranges = deque(maxlen=64)  # recent valid (stamp_s, range_m) samples
+        self.last_key = None            # stamp of last consumed source frame
 
         qos = QoSProfile(depth=1, reliability=ReliabilityPolicy.BEST_EFFORT)
         self.create_subscription(CompressedImage, g("front_topic"),
@@ -144,19 +152,27 @@ class SlamRgbd(Node):
     def _on_range(self, msg):
         r = msg.range
         if not np.isfinite(r) or r < self.min_range or r > self.max_range:
-            return                                       # hold last good range
-        self.range_m = r if np.isnan(self.range_m) else \
-            (1 - self.range_ema) * self.range_m + self.range_ema * r
+            return                                       # drop invalid samples
+        t = msg.header.stamp.sec + msg.header.stamp.nanosec * 1e-9
+        self.ranges.append((t, r))
 
-    def _metric_depth(self, raw):
+    def _range_at(self, stamp):
+        """TF-Luna range nearest the frame stamp, NaN if none close enough."""
+        if not self.ranges:
+            return float("nan")
+        t = stamp.sec + stamp.nanosec * 1e-9
+        rt, r = min(self.ranges, key=lambda p: abs(p[0] - t))
+        return r if abs(rt - t) <= self.range_max_age else float("nan")
+
+    def _metric_depth(self, raw, range_m):
         """raw (HxW, relative inverse depth) + TF-Luna range -> metres, 32FC1."""
         raw = np.maximum(raw, 1e-3)                      # avoid /0 at far field
         rc = float(np.median(
             raw[max(0, self.by - self.bwin):self.by + self.bwin + 1,
                 max(0, self.bx - self.bwin):self.bx + self.bwin + 1]))
-        if rc <= 1e-3 or np.isnan(self.range_m):
+        if rc <= 1e-3 or np.isnan(range_m):
             return None                                  # can't anchor this frame
-        depth = (self.range_m * rc) / raw                # metres
+        depth = (range_m * rc) / raw                     # metres
         depth[(depth < self.min_range) | (depth > self.max_range)] = 0.0
         return depth.astype(np.float32)
 
@@ -164,6 +180,13 @@ class SlamRgbd(Node):
         if self.frame is None or time.time() - self.stamp > STALE_S:
             return
         msg = self.frame
+        key = (msg.header.stamp.sec, msg.header.stamp.nanosec)
+        if key == self.last_key:
+            # Same source frame as last tick — re-publishing it would emit
+            # duplicate stamps, which rgbd_odometry rejects ("not valid
+            # consecutive stamps") and wastes a 345 ms BPU forward.
+            return
+        self.last_key = key
         bgr = decode(msg)
         if bgr is None:
             return
@@ -175,7 +198,7 @@ class SlamRgbd(Node):
         out = self.model.forward(bgr2nv12(resized))
         raw = out[0].buffer.reshape(self.size, self.size).astype(np.float32)
         raw = cv2.resize(raw, (self.w, self.h), interpolation=cv2.INTER_LINEAR)
-        depth = self._metric_depth(raw)
+        depth = self._metric_depth(raw, self._range_at(msg.header.stamp))
         if depth is None:
             return
 
