@@ -1,126 +1,124 @@
 # NEXT STEPS — your step-by-step path to the Stage 3 demo
 
-> Updated 2026-07-06. Ordered checklist of what **you** still have to do, with commands
-> and pass criteria. Detailed rationale: [docs/vio_slam_plan.md](docs/vio_slam_plan.md).
+> Updated 2026-07-13, after the **lidar pivot**: TF-Luna + visual SLAM (Track A) and the
+> RealSense D430 detour are both retired — an **RPLidar C1** now drives SLAM *and*
+> obstacle avoidance. This file is the live plan; ROADMAP.md / PROPOSAL.md are the
+> original (pre-pivot) submissions and stay as history.
 >
-> **Already done & verified** (skip, don't redo): 3 cameras simultaneous (30/30/16 fps),
-> `/imu/data` @ 200 Hz with measured noise covariances, motors + LUT, TF-Luna + MPU6050 on
-> I2C5, obstacle avoidance (PIDNet / YOLO / hybrid, scripts 07–09), ROS navigation chain
-> (`/obstacles` 10 Hz → planner → safety_gate + E-stop), HW JPEG decode path, depth model
-> bake-off (use **vits392**; the 25/13-subgraph builds can't load — don't fight them).
+> **Already done & verified** (skip, don't redo):
+> - **Platform:** 3 cameras simultaneous (front MJPEG + YUYV sides), `/imu/data` ~190 Hz,
+>   motors + duty↔velocity LUT (`invert_linear` fixes the swapped harness), camera
+>   intrinsics calibrated.
+> - **Operator app:** desktop console (PySide6, installers via CI) + robot agent
+>   (systemd, WS+UDP :8080, modes stopped/observe/manual/auto, teleop, E-stop,
+>   model toggles, camera tiles, telemetry HUD).
+> - **RPLidar C1** on `/dev/ttyUSB0` @ 460800: sllidar_ros2 vendored in `src/`
+>   (gitignored — reclone on fresh checkout), `/scan` 10 Hz / 720 pts / 16 m.
+>   **Mount:** laser 0° faces the robot's REAR → `yaw_offset_deg: 180` (scan_sectors,
+>   safety_gate) and `lidar_yaw: π` (lidar_slam TF) must stay in sync.
+> - **Lidar SLAM online:** `lidar_slam.launch.py` = dr_odom (dead-reckoning backbone:
+>   /cmd_vel_safe + IMU gyro, square closes 0.7 cm/0.9°) + slam_toolbox async +
+>   base_link→laser TF. Works live and on bag replay (`use_sim_time:=true`).
+> - **Obstacle avoidance (lidar, zero BPU):** `scan_sectors` → `/obstacles` (26×10°
+>   over ±130°, BLOCKED < 0.5 m); `safety_gate` = always-on 30 cm forward stop (±15°)
+>   + always-on 60 cm-⌀ proximity ring (blocks motion *toward* intruders; rotation
+>   always passes) + operator-togglable sector stop + **manual-mode steering assist**
+>   (deviates toward the clearer side < 0.8 m ahead). Verified with a 7-scenario
+>   fake-scan behavioral suite. The old PIDNet / Depth-Anything obstacle pipelines
+>   are deleted.
+> - **Console MAP view:** MAP toggle → agent renders `/map` to PNG @ 1 Hz with the
+>   robot marker from the map→base_link TF (needs SLAM running).
+> - **Depth Anything demo overlay:** `depth_bpu` fixed to the **vits392** bin (the
+>   only variant that fits the 320 MB ION pool); DEPTHANYTHING toggle works, 2.5 Hz.
+> - **First real map:** `maps/arena_20260713` (.pgm/.yaml + .posegraph/.data) from a
+>   5 min online drive; raw bag at `bags/mapping_fresh_20260713` for offline rebuilds.
 
 ---
 
-## Step 0 — Commit your work (10 min) ⚠️ do this first
-Everything since `764f314` is uncommitted: navigation stack, avoidance scripts 07–10,
-calibration tools 11–13, safety_gate, docs. Commit now so every later step has a
-known-good baseline to diff against:
+## Step 0 — Commit & push the working tree (10 min) ⚠️ do this first
+Uncommitted right now: the `depth_bpu` vits392 fix and `maps/arena_20260713.*`.
 ```bash
 cd ~/rdk-x5-navbot
-git add -A && git status        # review — no *.bin/*.log/calib_frames junk
-git commit -m "obstacle avoidance (PIDNet/YOLO/hybrid), ROS nav stack, SLAM phase 1 tooling"
-git push
+git add -A && git status      # review; the 7 MB .posegraph is optional to track
+git commit -m "depth_bpu vits392 fix + first arena map" && git push
 ```
 
-## Step 1 — Camera intrinsics calibration (30 min, needs a printed chessboard)
-1. Print a chessboard with **9×6 inner corners**, tape it dead-flat to cardboard,
-   measure one square with a ruler (mm).
-2. ```bash
-   python3 scripts/11_front_cam_calib.py --square-mm <measured>
-   ```
-3. Open `http://<robot-ip>:8080`, move the board: near/far, all corners, strong tilts,
-   until 40 auto-captures (green flash each).
-4. **Pass:** printed `RMS reprojection error < 0.5 px`. Re-run with better coverage if not.
-   Output `config/camera_front.yaml` is auto-loaded by the camera launch from then on.
-
-## Step 2 — Camera–IMU time offset (15 min)
-```bash
-sudo python3 scripts/13_cam_imu_offset.py     # rotate robot left-right by hand, ~1 Hz
-```
-Run **3×**, note the mean. **Pass:** |offset| < 50 ms, repeatable ±5 ms.
-Write the value at the top of `docs/vio_slam_plan.md` — the SLAM config needs it later.
-
-## Step 3 — Rigid mount + lever arm (30 min, mechanical)
-Bolt (don't tape) the front camera and IMU to the chassis — any flex ruins VIO.
-Measure with calipers: IMU→camera x/y/z offsets (mm) and note both axis orientations.
-Record them in `docs/vio_slam_plan.md` §Phase 1.3.
-
-## Step 4 — Depth Anything ≥ 5 FPS recompile (half day, PC with the toolchain)
-vits392 (2.9 FPS) misses the ≥5 FPS exit criterion. On the machine you used for the
-existing conversions (see `docs/depth_anything_conversion.md`):
-1. Re-export Depth Anything V2 ViT-S at input **~336×336** (or 280), same recipe that
-   produced your **single-subgraph** builds (vits392/vitsopt2) — *not* the "opt" recipe
-   that fragmented into 13–25 subgraphs.
-2. Copy `model_output_*` to `~/Desktop/RDK/`, then verify on the robot:
+## Step 1 — Demo-quality map of the full arena (1–2 h)
+The current map covers ~8.5 m² — remap the whole demo area in one continuous drive.
+1. Manual mode on, then fresh SLAM + recording (ask Claude, or):
    ```bash
-   ls ~/Desktop/RDK/model_output_<new>/main_graph_subgraph_*.json | wc -l   # must be 1
-   sudo python3 scripts/10_depth_preview.py --model ~/Desktop/RDK/model_output_<new>/<file>.bin
+   ros2 launch navbot_slam lidar_slam.launch.py   # agent mode already owns the lidar
+   ros2 bag record /scan /imu/data /cmd_vel /cmd_vel_safe -o bags/arena_full
    ```
-3. **Pass:** ≥ 5 FPS in the preview banner and depth image looks sane at :8080.
-
-## Step 5 — depth_bpu node + canonical bags (1 day)
-1. Ask Claude to build `navbot_perception/depth_bpu` (new model → metric scale via
-   TF-Luna → `/perception/depth`). **Pass:** `ros2 topic hz /perception/depth` ≥ 5,
-   depth vs TF-Luna error ≤ 15 % at 1–3 m (point robot at a wall, compare).
-2. Record the four regression bags (cameras+IMU+depth running; drive with keyboard or
-   slow `motors:=true`):
-   - `bags/loop_10m` — tape-measure a 10 m loop on the floor, drive it gently
-   - `bags/room_30m2` — full room sweep, end where you started
-   - `bags/kidnap` — drive, lift, carry 3 m, set down, drive again
-   - `bags/stress` — fast turns, lights dimmed
+2. Drive: slider ≥ 30 %, gentle turns, pause at corners, **close every loop** (return
+   to the start; revisit rooms from the same direction).
+3. Save + snapshot:
    ```bash
-   ros2 bag record /cam_front/image_raw /cam_front/camera_info /imu/data /perception/depth -o bags/loop_10m
+   ros2 service call /slam_toolbox/save_map slam_toolbox/srv/SaveMap \
+     "{name: {data: /home/sunrise/rdk-x5-navbot/maps/arena_demo}}"
+   ros2 service call /slam_toolbox/serialize_map slam_toolbox/srv/SerializePoseGraph \
+     "{filename: /home/sunrise/rdk-x5-navbot/maps/arena_demo}"
    ```
-   These bags are your offline test set for every SLAM decision that follows.
+4. **Pass:** walls straight and single (no doubling), every demo room covered, ≥ 1 loop
+   closure observed live (map visibly snaps). If it smears: rebuild offline from the
+   bag with tuned slam_toolbox params instead of re-driving.
 
-## Step 6 — SLAM bake-off on the bags (2–3 days)
-1. `sudo apt install ros-humble-rtabmap-ros ros-humble-imu-filter-madgwick`
-2. With Claude: wire RTAB-Map (rgbd_odometry + imu prior) to replay each bag; measure
-   10 m-loop drift %, tracking losses, loop closures, kidnap relocalization, CPU %.
-3. Only if drift > 5 % or tracking is unusable: build ORB-SLAM3 (Track B) and compare.
-4. **Gate: pick the backend that meets drift ≤ 5 % with fewest losses.** Record numbers
-   in the plan doc.
+## Step 2 — Localization mode against the saved map (half day)
+Run slam_toolbox in `localization` mode with `map_file_name: maps/arena_demo` (new
+`localization:=true` arg in `lidar_slam.launch.py`, or a second config yaml).
+**Pass:** started anywhere in the arena, the console marker snaps to the true position
+after a short drive (≤ 10 s), and stays correct through a 2-min teleop.
 
-## Step 7 — Online `vio_slam` integration (2 days)
-With Claude: wrap the winner as `navbot_slam/vio_slam` publishing `/odom` + TF +
-`/map`, `/save_map` + `/load_map`; add `slam.launch.py`; planner speed caps while
-tracking. **Pass (= W4 exit):** map a ≥ 30 m² room live with ≥ 1 loop closure; drift
-≤ 5 % on the 10 m loop; map survives reboot + `/load_map`.
+## Step 3 — Goal navigation (2 days)
+`behaviour_manager` + goal-seeking planner: send `/goal` (console click on the MAP
+panel is the natural UI — the agent already has the map→pixel transform), plan through
+map free space, follow with `local_planner`-style sector steering; safety_gate stays
+underneath untouched.
+**Pass:** reach a saved goal from 3 m away around 1 obstacle, ≥ 6/10 runs.
 
-## Step 8 — Kidnap recovery + goal navigation (2 days)
-1. `relocalizer`: lift detect (IMU spike + floor vanishing) → E-stop → on set-down,
-   rotate-scan until the backend relocalizes → `/relocalized_pose` → resume.
-2. `behaviour_manager`: MAP / NAV / AVOID / RELOCALIZE states, `/goal` handling; planner
-   seeks the goal through free sectors instead of wandering.
-3. **Pass (= W5 exit):** after lift-and-carry-3 m, relocalize ≤ 10 s within 30 cm/15°;
-   reach a saved goal from 3 m away around 1 obstacle, ≥ 6/10 runs.
+## Step 4 — Kidnap recovery (1–2 days)
+Lift detect (IMU |az| spike + /scan discontinuity) → E-stop → on set-down, rotate-scan
+until localization converges → resume goal.
+**Pass:** after lift-and-carry-3 m, relocalize ≤ 10 s within 30 cm / 15°.
 
-## Step 9 — Integration & real-time hardening (2 days)
-- Pin safety_gate + motor_controller to dedicated cores, RT priority; verify E-stop
-  zeroes motors < 100 ms under full load.
-- Confirm queue depth 1 (drop-not-queue) on every image subscriber.
-- Profile p95 image→`/cmd_vel` latency ≤ 150 ms (`ros2 topic delay` + timestamps).
-- 5-min soak with 0 hard collisions; 20-min battery run without brownout
-  (watch `dmesg` for USB resets — the hub power matters under motor load).
+## Step 5 — Integration & real-time hardening (2 days)
+- E-stop zeroes motors < 100 ms under full load (measure over UDP path).
+- p95 `/scan`→`/cmd_vel_safe` latency ≤ 150 ms; queue depth 1 everywhere on images.
+- 5-min soak with 0 hard collisions; 20-min battery run (watch `dmesg` for USB resets
+  — hub power under motor load; the right-cam connector is already known-loose).
 
-## Step 10 — Stage 3 demo (1–2 days)
-Scored mission, ≥ 8/10: map the room → save goal → kidnap mid-run → relocalize →
-arrive at goal. Record rosbag + annotated video of every run, commit both, tag
-`v1.0-demo`, update README Status.
+## Step 6 — Stage 3 demo (1–2 days)
+Scored mission, ≥ 8/10: map (or load `arena_demo`) → navigate to saved goal →
+kidnap mid-run → relocalize → arrive. Record rosbag + annotated video of every run,
+commit both, tag `v1.0-demo`, update README Status.
 
 ---
 
 ### Quick reference — daily drivers
 ```bash
-ros2 launch navbot_bringup navigation.launch.py [motors:=true]   # avoidance stack
-ros2 service call /estop std_srvs/srv/SetBool "{data: true}"     # kill switch
-sudo python3 scripts/09_hybrid_avoid.py --dry-run                # standalone avoider + :8080 view
-sudo python3 scripts/10_depth_preview.py --model vits392         # depth check
-sudo python3 scripts/test_i2c_sensors.py --bus 5                 # IMU+lidar bench test
+# modes are owned by the agent (console buttons, or WS :8080 set_mode)
+ros2 launch navbot_slam lidar_slam.launch.py            # SLAM beside an active mode
+ros2 service call /estop std_srvs/srv/SetBool "{data: true}"      # kill switch
+ros2 topic hz /scan /obstacles /odom_dr                 # sensor health
+ros2 bag record /scan /imu/data /cmd_vel /cmd_vel_safe -o bags/<name>
 ```
+
 ### Known traps (cost hours before — don't rediscover them)
-- Source **both** `/opt/tros/humble/setup.bash` **and** `install/setup.bash` in every shell.
-- Side cameras must stay **YUYV** — any MJPEG on the 8022 clones starves the USB bus.
-- Front camera lives in **port 1.1**; device paths are by-path, not /dev/videoN.
-- Keep the robot **still for ~2 s** after starting imu_driver (bias + scale calibration).
-- Multi-subgraph BPU builds (13–25 subgraphs) will not load — 382 MB ION is fixed.
+- Source **both** `/opt/tros/humble/setup.bash` **and** `install/setup.bash`.
+- The agent owns ONE `ros2 launch` — **never** start manual/navigation launches by
+  hand next to a live mode (camera abort -6, GPIO unexport kills the live
+  motor_controller, and now the lidar serial port collides too). Apply rebuilds via
+  `set_mode stopped → manual`.
+- Console **speed slider scales linear velocity only** — mapping at < 20 % slider
+  gives creep-forward with normal-speed turns and ruins scan matching.
+- C1 mount: laser 0° = robot rear. Change the mount → update `yaw_offset_deg` (×2
+  launches) **and** `lidar_yaw` together.
+- Keep the robot **still ~3 s** after starting imu_driver / dr_odom (gyro bias).
+- Side cameras must stay **YUYV**; front camera lives in port 1.1 (by-path names).
+- BPU/ION: only single-subgraph bins load; vits392 is the proven depth model; YOLO11
+  and Depth Anything may not fit ION together — toggle one off first.
+- MAP view is blank until slam_toolbox runs; the PNG only refreshes when the grid
+  changes (drive a little).
+- Root-run tools leave root-owned files in sunrise's repo — `chown` back.
+- `pkill -f <pattern>` self-matches the compound command that contains the pattern —
+  use `[c]haracter-class` patterns.

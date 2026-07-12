@@ -1,6 +1,11 @@
 # Roadmap — RDK X5 Tri-Cam NavBot
 
 > **Version:** 1.0 &nbsp;|&nbsp; **Date:** 2026-06-26 &nbsp;|&nbsp; **Target:** Stage 3 demo (by 10th July)
+>
+> **2026-07-13 — plan superseded:** the sensor architecture pivoted from visual SLAM
+> (TF-Luna + cameras, then briefly RealSense D430) to an **RPLidar C1** driving both
+> SLAM (slam_toolbox) and obstacle avoidance. This table is kept as the original
+> submission; the live, updated plan is **[NEXT_STEPS.md](NEXT_STEPS.md)**.
 
 Week-by-week milestones with **exit criteria** (the test that must pass before moving on). This doubles
 as the GitHub Projects board: each row = a milestone column, each exit criterion = a closing issue.
