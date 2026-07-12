@@ -9,7 +9,7 @@ After capturing images of a chessboard pattern, this script calibrates the camer
 and saves the calibration parameters to a YAML file.
 
 Usage: python3 calibrate_camera.py [image_dir] [output_yaml]
-e.g.   python3 calibrate_camera.py calib_images_front calibration_front.yaml
+e.g.   
 """
 
 # Chessboard settings
