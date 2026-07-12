@@ -16,6 +16,7 @@ from .widgets.estop_button import EStopButton
 from .widgets.health_panel import HealthPanel
 from .widgets.joystick import JoystickWidget
 from .widgets.log_panel import LogPanel
+from .widgets.main_view import MainView
 from .widgets.map_panel import MapPanel
 from .widgets.mode_bar import ModeBar
 from .widgets.model_bar import ModelBar
@@ -88,6 +89,7 @@ class MainWindow(QMainWindow):
         right.addWidget(self._avoid_lamp)
         right.addWidget(self.mode_bar)
         right.addWidget(self.model_bar)
+        right.addWidget(self.map_panel.toggle)
         right.addWidget(self.estop)
         right.addWidget(self.joystick, 0, Qt.AlignHCenter)
         speed_row = QHBoxLayout()
@@ -97,7 +99,6 @@ class MainWindow(QMainWindow):
         right.addWidget(self._teleop_readout)
         right.addWidget(self.attitude)
         right.addWidget(self.health, 1)
-        right.addWidget(self.map_panel, 1)
         right_w = QWidget()
         right_w.setLayout(right)
         right_w.setMaximumWidth(360)
@@ -109,8 +110,10 @@ class MainWindow(QMainWindow):
         right_scroll.setMaximumWidth(380)
         right_scroll.setMinimumWidth(280)
 
+        self._main_view = MainView(self.video, self.map_panel.view)
+
         split = QSplitter(Qt.Horizontal)
-        split.addWidget(self.video)
+        split.addWidget(self._main_view)
         split.addWidget(right_scroll)
         split.setStretchFactor(0, 1)
 
@@ -149,7 +152,7 @@ class MainWindow(QMainWindow):
             lambda cam, on: self.client.send_video(cam, on))
         self.mode_bar.modeRequested.connect(self.client.send_mode)
         self.model_bar.modelToggled.connect(self._on_model_toggled)
-        self.map_panel.mapToggled.connect(self.client.send_map)
+        self.map_panel.mapToggled.connect(self._on_map_toggled)
         self.estop.estopRequested.connect(self.client.send_estop)
         self.joystick.moved.connect(self.teleop.joystick)
         self.teleop.commandChanged.connect(
@@ -196,6 +199,10 @@ class MainWindow(QMainWindow):
         self.client.send_model(model, enabled)
         self.video.set_model_overlay_enabled(model, enabled)
 
+    def _on_map_toggled(self, enabled):
+        self.client.send_map(enabled)
+        self._main_view.set_map_mode(enabled)
+
     # ---------------- connection ----------------
 
     def _toggle_connection(self):
@@ -217,6 +224,8 @@ class MainWindow(QMainWindow):
         self.mode_bar.set_connected(ok)
         self.model_bar.set_connected(ok)
         self.map_panel.set_connected(ok)
+        if not ok:
+            self._main_view.set_map_mode(False)
         if ok:
             for cam in self.video.enabled_cams():
                 self.client.send_video(cam, True)
