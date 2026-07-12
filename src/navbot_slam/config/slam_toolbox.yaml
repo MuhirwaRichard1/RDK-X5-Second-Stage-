@@ -1,0 +1,81 @@
+# slam_toolbox (async) tuned for the NavBot: RPLidar C1 (10 Hz, 720 pts,
+# 16 m) + dr_odom dead-reckoning backbone (odom->base_link TF from
+# /cmd_vel_safe + IMU gyro). Started by lidar_slam.launch.py.
+slam_toolbox:
+  ros__parameters:
+
+    # Plugin params
+    solver_plugin: solver_plugins::CeresSolver
+    ceres_linear_solver: SPARSE_NORMAL_CHOLESKY
+    ceres_preconditioner: SCHUR_JACOBI
+    ceres_trust_strategy: LEVENBERG_MARQUARDT
+    ceres_dogleg_type: TRADITIONAL_DOGLEG
+    ceres_loss_function: None
+
+    # ROS Parameters
+    odom_frame: odom
+    map_frame: map
+    base_frame: base_link          # dr_odom's child frame (not base_footprint)
+    scan_topic: /scan
+    use_map_saver: true
+    mode: mapping                  # switch to localization to run against a saved map
+
+    debug_logging: false
+    throttle_scans: 1
+    transform_publish_period: 0.02
+    map_update_interval: 2.0       # X5 handles 2D SLAM easily; quick operator feedback
+    # C1 spec range is 0.05-16 m; floor of 0.15 rejects returns off the
+    # robot's own body, ceiling of 12 drops the long noisy tail indoors.
+    min_laser_range: 0.15
+    max_laser_range: 12.0
+    resolution: 0.05
+    minimum_time_interval: 0.5
+    transform_timeout: 0.2
+    tf_buffer_duration: 30.
+    stack_size_to_use: 40000000
+    enable_interactive_mode: false # headless robot
+
+    # General Parameters
+    use_scan_matching: true
+    use_scan_barycenter: true
+    # Denser graph nodes than stock (0.5/0.5): dr_odom translation is
+    # open-loop commanded velocity, so give the scan matcher more frequent
+    # chances to correct it before drift accumulates.
+    minimum_travel_distance: 0.25
+    minimum_travel_heading: 0.25
+    scan_buffer_size: 10
+    scan_buffer_maximum_scan_distance: 10.0
+    link_match_minimum_response_fine: 0.1
+    link_scan_maximum_distance: 1.5
+    loop_search_maximum_distance: 3.0
+    do_loop_closing: true
+    loop_match_minimum_chain_size: 10
+    loop_match_maximum_variance_coarse: 3.0
+    loop_match_minimum_response_coarse: 0.35
+    loop_match_minimum_response_fine: 0.45
+
+    # Correlation Parameters
+    correlation_search_space_dimension: 0.5
+    correlation_search_space_resolution: 0.01
+    correlation_search_space_smear_deviation: 0.1
+
+    # Loop Closure Parameters
+    loop_search_space_dimension: 8.0
+    loop_search_space_resolution: 0.05
+    loop_search_space_smear_deviation: 0.03
+
+    # Scan Matcher Parameters
+    # If the matcher visibly fights dr_odom's open-loop translation (walls
+    # doubling along the drive direction), raise distance_variance_penalty
+    # first — higher = more tolerance for deviating from odometry.
+    distance_variance_penalty: 0.5
+    angle_variance_penalty: 1.0
+
+    fine_search_angle_offset: 0.00349
+    coarse_search_angle_offset: 0.349
+    coarse_angle_resolution: 0.0349
+    minimum_angle_penalty: 0.9
+    minimum_distance_penalty: 0.5
+    use_response_expansion: true
+    min_pass_through: 2
+    occupancy_threshold: 0.1

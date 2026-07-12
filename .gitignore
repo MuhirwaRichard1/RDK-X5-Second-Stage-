@@ -13,3 +13,6 @@ models/*.bin
 
 # Claude Code local settings (personal, not shared)
 .claude/settings.local.json
+
+# Third-party ROS driver, clone from https://github.com/Slamtec/sllidar_ros2
+src/sllidar_ros2/
