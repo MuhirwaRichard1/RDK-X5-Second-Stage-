@@ -58,12 +58,17 @@ def generate_launch_description():
                           "inverted": False,
                           "angle_compensate": True,
                           "scan_mode": "Standard"}]),
+        # MOUNT: C1 laser-frame 0° faces the robot's REAR — 180° offset maps
+        # rays to robot bearings. Keep in sync with manual.launch.py and
+        # lidar_slam.launch.py lidar_yaw.
         Node(package="navbot_perception", executable="scan_sectors",
-             name="scan_sectors", output="screen"),
+             name="scan_sectors", output="screen",
+             parameters=[{"yaw_offset_deg": 180.0}]),
         Node(package="navbot_navigation", executable="local_planner",
              name="local_planner", output="screen"),
         Node(package="navbot_drive", executable="safety_gate",
-             name="safety_gate", output="screen"),
+             name="safety_gate", output="screen",
+             parameters=[{"yaw_offset_deg": 180.0}]),
         Node(package="navbot_drive", executable="motor_controller",
              name="motor_controller", output="screen",
              condition=IfCondition(LaunchConfiguration("motors"))),

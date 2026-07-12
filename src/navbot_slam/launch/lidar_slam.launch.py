@@ -26,10 +26,11 @@ Save a finished map:
   ros2 service call /slam_toolbox/save_map slam_toolbox/srv/SaveMap \
     "{name: {data: /home/sunrise/maps/arena}}"
 
-TF: base_link -> laser below is a ROUGH mount estimate — measure and override
-via lidar_x/lidar_z/lidar_yaw. C1's 0 deg points away from the cable
-connector: connector-toward-rear mount => lidar_yaw 0; if the map's walls sit
-rotated relative to robot motion, the yaw is wrong.
+TF: base_link -> laser. The C1 is mounted with its laser-frame 0 deg facing
+the robot's REAR (established live 2026-07-13: front/back obstacles were
+swapped), so lidar_yaw defaults to pi. Keep in sync with the 180 deg
+yaw_offset_deg that manual/navigation launches pass to scan_sectors and
+safety_gate. x/z are still rough estimates — measure and override.
 """
 
 from launch import LaunchDescription
@@ -56,7 +57,7 @@ def generate_launch_description():
         # rough base_link -> laser mount — MEASURE & override
         DeclareLaunchArgument("lidar_x", default_value="0.0"),
         DeclareLaunchArgument("lidar_z", default_value="0.15"),
-        DeclareLaunchArgument("lidar_yaw", default_value="0.0"),
+        DeclareLaunchArgument("lidar_yaw", default_value="3.14159265"),
     ]
 
     st = {"use_sim_time": use_sim_time}
