@@ -47,6 +47,7 @@ class RobotClient(QObject):
     sectorsReceived = Signal(dict)
     gridOverlayReceived = Signal(dict)
     detectionsReceived = Signal(dict)
+    mapReceived = Signal(dict)
     attitudeReceived = Signal(dict)          # 10 Hz roll/pitch/yaw/yaw_rate
     logReceived = Signal(dict)
     errorReceived = Signal(str)
@@ -135,6 +136,9 @@ class RobotClient(QObject):
     def send_model(self, model, enable):
         self.send({"type": "set_model", "model": model, "enable": bool(enable)})
 
+    def send_map(self, enable):
+        self.send({"type": "set_map", "enable": bool(enable)})
+
     def send_video(self, cam, enable, fps=None, quality=None):
         msg = {"type": "video", "cam": cam, "enable": bool(enable)}
         if fps:
@@ -208,6 +212,8 @@ class RobotClient(QObject):
             self.gridOverlayReceived.emit(msg)
         elif t == "detections":
             self.detectionsReceived.emit(msg)
+        elif t == "map":
+            self.mapReceived.emit(msg)
         elif t == "att":
             self.attitudeReceived.emit(msg)
         elif t == "log":

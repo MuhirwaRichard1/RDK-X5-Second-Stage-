@@ -20,18 +20,21 @@ log = logging.getLogger("navbot.main")
 
 
 async def _amain(args):
-    bridge = launch_mgr = video_pump = None
+    bridge = launch_mgr = video_pump = map_pump = None
     if not args.no_ros:
         from .launch_manager import LaunchManager
         from .ros_bridge import RosBridge
         from .video import VideoPump
+        from .map_pump import MapPump
         bridge = RosBridge()
         launch_mgr = LaunchManager(bridge)
         video_pump = VideoPump(bridge)
+        map_pump = MapPump(bridge)
 
     app = AgentApp(bridge=bridge, launch_mgr=launch_mgr)
     app.hub = Hub()
     app.video_pump = video_pump
+    app.map_pump = map_pump
 
     stop = asyncio.Event()
     loop = asyncio.get_running_loop()
@@ -62,6 +65,9 @@ async def _amain(args):
             video_pump.attach(app.hub)
             tasks += [asyncio.create_task(video_pump.pump(cam))
                       for cam in config.CAMERAS]
+        if map_pump:
+            map_pump.attach(app.hub)
+            tasks.append(asyncio.create_task(map_pump.pump()))
 
         app.add_log("agent", "info", f"navbot-agent {__version__} up"
                     + (" (--no-ros)" if args.no_ros else ""))

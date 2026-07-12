@@ -72,6 +72,10 @@ VIDEO_DEFAULT_FPS = {"front": 15.0, "left": 5.0, "right": 5.0}
 VIDEO_SD_SIZE = (640, 360)    # front "sd" re-encode size
 VIDEO_JPEG_QUALITY = 70
 
+# SLAM map view (console MAP toggle). Low rate — the map itself only
+# changes a few times a second at most, and it's opt-in per session.
+MAP_PUSH_HZ = 1.0
+
 # Topics whose publish rate the telemetry reports.
 RATE_TOPICS = [
     "/cam_front/image_raw",

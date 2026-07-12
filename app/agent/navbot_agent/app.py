@@ -20,6 +20,7 @@ class AgentApp:
         self.bridge = bridge               # ros_bridge.RosBridge or None
         self.launch_mgr = launch_mgr       # launch_manager.LaunchManager or None
         self.video_pump = None             # video.VideoPump or None (set by main)
+        self.map_pump = None               # map_pump.MapPump or None (set by main)
         self.health = HealthSampler()
         self.log_ring = collections.deque(maxlen=config.LOG_RING)
 
@@ -132,6 +133,9 @@ class AgentApp:
         if self.video_pump:
             self.video_pump.configure(cam, fps=msg.get("fps"),
                                       quality=msg.get("quality"))
+
+    def on_set_map(self, session, enable):
+        session.wants_map = bool(enable)
 
     def on_client_gone(self, session):
         # Belt and braces: if the last teleop-capable client vanishes the

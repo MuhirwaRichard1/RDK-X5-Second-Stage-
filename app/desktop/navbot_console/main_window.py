@@ -16,6 +16,7 @@ from .widgets.estop_button import EStopButton
 from .widgets.health_panel import HealthPanel
 from .widgets.joystick import JoystickWidget
 from .widgets.log_panel import LogPanel
+from .widgets.map_panel import MapPanel
 from .widgets.mode_bar import ModeBar
 from .widgets.model_bar import ModelBar
 from .widgets.video_panel import VideoPanel
@@ -61,6 +62,7 @@ class MainWindow(QMainWindow):
         self.joystick = JoystickWidget()
         self.attitude = AttitudePanel()
         self.health = HealthPanel()
+        self.map_panel = MapPanel()
         self.log = LogPanel()
 
         self.speed = QSlider(Qt.Horizontal, minimum=10, maximum=100, value=50)
@@ -95,6 +97,7 @@ class MainWindow(QMainWindow):
         right.addWidget(self._teleop_readout)
         right.addWidget(self.attitude)
         right.addWidget(self.health, 1)
+        right.addWidget(self.map_panel, 1)
         right_w = QWidget()
         right_w.setLayout(right)
         right_w.setMaximumWidth(360)
@@ -135,6 +138,7 @@ class MainWindow(QMainWindow):
         self.client.sectorsReceived.connect(self.video.on_sectors)
         self.client.gridOverlayReceived.connect(self.video.on_grid_overlay)
         self.client.detectionsReceived.connect(self.video.on_detections)
+        self.client.mapReceived.connect(self.map_panel.on_map)
         self.client.attitudeReceived.connect(self.attitude.on_attitude)
         self.client.logReceived.connect(self.log.on_log)
         self.client.errorReceived.connect(
@@ -145,6 +149,7 @@ class MainWindow(QMainWindow):
             lambda cam, on: self.client.send_video(cam, on))
         self.mode_bar.modeRequested.connect(self.client.send_mode)
         self.model_bar.modelToggled.connect(self._on_model_toggled)
+        self.map_panel.mapToggled.connect(self.client.send_map)
         self.estop.estopRequested.connect(self.client.send_estop)
         self.joystick.moved.connect(self.teleop.joystick)
         self.teleop.commandChanged.connect(
@@ -211,6 +216,7 @@ class MainWindow(QMainWindow):
             f"color:{'#00c853' if ok else '#888'};font-size:16px;")
         self.mode_bar.set_connected(ok)
         self.model_bar.set_connected(ok)
+        self.map_panel.set_connected(ok)
         if ok:
             for cam in self.video.enabled_cams():
                 self.client.send_video(cam, True)

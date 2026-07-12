@@ -37,7 +37,8 @@ UDP_VIDEO_S = struct.Struct(">BBHIBB")
 
 UDP_CHUNK = 1200            # video fragment payload — fits any sane MTU
 
-CLIENT_TYPES = {"hello", "teleop", "estop", "set_mode", "video", "ping", "set_model"}
+CLIENT_TYPES = {"hello", "teleop", "estop", "set_mode", "video", "ping",
+                "set_model", "set_map"}
 
 
 def pack_video(cam_id: int, seq: int, mono_ms: int, jpeg: bytes) -> bytes:
@@ -103,6 +104,14 @@ def detections(camera, boxes):
     {x1,y1,x2,y2,score,class_name} dicts, coords normalized 0..1."""
     return {"v": PROTO_VERSION, "type": "detections", "camera": camera,
             "boxes": boxes}
+
+
+def map_msg(seq, width, height, png_b64):
+    """SLAM occupancy-grid snapshot, rendered agent-side to a small grayscale
+    PNG (robot marker already baked in when a fresh map->base_link TF is
+    available) — the desktop just decodes and displays."""
+    return {"v": PROTO_VERSION, "type": "map", "seq": seq,
+            "width": width, "height": height, "png_b64": png_b64}
 
 
 def attitude(roll_deg, pitch_deg, yaw_deg, yaw_rate_dps):

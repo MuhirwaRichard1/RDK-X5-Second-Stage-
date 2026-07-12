@@ -20,13 +20,16 @@ import math
 import threading
 import time
 
+import numpy as np
 import rclpy
+import tf2_ros
 from rclpy.executors import SingleThreadedExecutor
 from rclpy.node import Node
 from rclpy.qos import (QoSProfile, ReliabilityPolicy, DurabilityPolicy,
                        qos_profile_sensor_data)
 
 from geometry_msgs.msg import Twist
+from nav_msgs.msg import OccupancyGrid
 from sensor_msgs.msg import CompressedImage, Image, Imu, Range
 from std_msgs.msg import Bool
 from std_srvs.srv import SetBool
@@ -56,6 +59,8 @@ class RosBridge:
         self._rates_taken = time.monotonic()
         self._rates_last = {t: 0 for t in config.RATE_TOPICS}
         self.attitude = None            # (roll°, pitch°, yaw°, yaw_rate°/s, t_mono)
+        self.map_slot = None            # (data, width, height, res, ox, oy, seq, mono_ms)
+        self.robot_pose = None          # (x, y, yaw_rad, t_mono) from map->base_link TF
 
     # ---------------- lifecycle ----------------
 
@@ -166,12 +171,18 @@ class _AgentNode(Node):
                            for m, topic in config.MODEL_ENABLE_TOPIC.items()}
         self._model_published = {m: False for m in config.MODELS}
 
+        self._map_seq = 0
+        self.create_subscription(OccupancyGrid, "/map", self._on_map, latched)
+        self._tf_buffer = tf2_ros.Buffer()
+        self._tf_listener = tf2_ros.TransformListener(self._tf_buffer, self)
+
         self._cmd_pub = self.create_publisher(Twist, "/cmd_vel", 10)
         self._estop_cli = self.create_client(SetBool, "/estop")
 
         self.create_timer(1.0 / config.TELEOP_RATE_HZ, self._teleop_tick)
         self.create_timer(0.1, self._estop_reconcile)
         self.create_timer(0.5, self._model_reconcile)
+        self.create_timer(0.5, self._pose_tick)
         self.get_logger().info("navbot_agent bridge node up")
 
     # ---------------- subscriptions ----------------
@@ -259,6 +270,18 @@ class _AgentNode(Node):
                      zip(msg.x1, msg.y1, msg.x2, msg.y2, msg.score, msg.class_name)]
             b._post(b.app.hub.broadcast_fast, protocol.detections(msg.camera, boxes))
 
+    def _on_map(self, msg):
+        self._map_seq += 1
+        info = msg.info
+        # msg.data is signed int8 (-1 unknown, 0..100 occupancy probability);
+        # bytes() rejects negatives, so go through numpy to preserve the
+        # signed byte pattern instead of the (positive) Python int values.
+        data = np.array(msg.data, dtype=np.int8).tobytes()
+        self.b.map_slot = (
+            data, info.width, info.height, info.resolution,
+            info.origin.position.x, info.origin.position.y,
+            self._map_seq, int(time.monotonic() * 1000))
+
     def _on_range(self, msg):
         self._count("/range_forward")
         cm = msg.range * 100.0 if not math.isnan(msg.range) else math.nan
@@ -315,6 +338,23 @@ class _AgentNode(Node):
             if want != self._model_published[model]:
                 self._model_pub[model].publish(Bool(data=want))
                 self._model_published[model] = want
+
+    def _pose_tick(self):
+        """2 Hz poll of the map->base_link transform for the console's map
+        marker. No-op (leaves the last known pose to go stale on its own)
+        until SLAM is actually running and has processed at least one scan
+        — same 'quietly not ready yet' shape as _estop_reconcile."""
+        try:
+            t = self._tf_buffer.lookup_transform(
+                "map", "base_link", rclpy.time.Time())
+        except (tf2_ros.LookupException, tf2_ros.ConnectivityException,
+                tf2_ros.ExtrapolationException):
+            return
+        q = t.transform.rotation
+        yaw = math.atan2(2.0 * (q.w * q.z + q.x * q.y),
+                         1.0 - 2.0 * (q.y * q.y + q.z * q.z))
+        self.b.robot_pose = (t.transform.translation.x,
+                             t.transform.translation.y, yaw, time.monotonic())
 
     def _estop_done(self, fut):
         self._estop_inflight_t = None

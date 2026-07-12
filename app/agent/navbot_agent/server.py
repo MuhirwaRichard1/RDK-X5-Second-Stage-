@@ -35,6 +35,7 @@ class ClientSession:
         self.outbox = asyncio.Queue(maxsize=256)
         self.video_slots = {}          # cam_id -> packed frame (latest wins)
         self.video_cams = set()        # camera names this client wants
+        self.wants_map = False         # opted into the SLAM map view
         self._kick_pending = False
         self.token = secrets.token_bytes(8)
         self.udp_addr = None           # last address a valid datagram came from
@@ -137,6 +138,19 @@ class Hub:
     def wants_video(self, cam_name):
         return any(cam_name in s.video_cams for s in self.sessions)
 
+    def wants_map(self):
+        return any(s.wants_map for s in self.sessions)
+
+    def send_map(self, msg):
+        """Selective send (unlike broadcast()) — the map can be a few tens
+        of KB and most sessions won't have opted in."""
+        if not self.sessions:
+            return
+        text = json.dumps(msg)
+        for s in list(self.sessions):
+            if s.wants_map:
+                s.send_text(text)
+
 
 class WsServer:
     def __init__(self, app, host, port):
@@ -201,6 +215,8 @@ class WsServer:
         elif t == "set_model":
             self.app.on_set_model(str(msg.get("model", "")),
                                   bool(msg.get("enable", True)), session)
+        elif t == "set_map":
+            self.app.on_set_map(session, bool(msg.get("enable", True)))
         # a repeated "hello" is harmless — ignore
 
 
