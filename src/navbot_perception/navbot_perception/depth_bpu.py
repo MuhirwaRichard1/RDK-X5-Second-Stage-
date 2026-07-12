@@ -27,9 +27,11 @@ from navbot_msgs.msg import GridOverlay
 
 from .imgproc import bgr2nv12, decode
 
-# ViT-S 518: the conversion doc's own "start here" recommendation for a
-# ~10-TOPS edge BPU (docs/depth_anything_conversion.md).
-MODEL_BIN = "/home/sunrise/Desktop/RDK/model_output_vits/depth_anything_v2_vits_518.bin"
+# ViT-S 392: the only converted variant that BOTH fits the stock 320 MB ION
+# pool AND runs fast (~2.8 Hz). The doc's "start here" ViT-S 518 needs a
+# contiguous ION alloc that fails even with the BPU idle — this node's own
+# load-failure path used to fire on every enable because of it.
+MODEL_BIN = "/home/sunrise/Desktop/RDK/model_output_vits392/depth_anything_v2_vits392.bin"
 STALE_S = 0.6
 GRID_ROWS = 12
 GRID_COLS = 16
