@@ -19,10 +19,9 @@ setup(
     license="MIT",
     entry_points={
         "console_scripts": [
-            "obstacle_fusion = navbot_perception.obstacle_fusion:main",
+            "scan_sectors = navbot_perception.scan_sectors:main",
             "detection_bpu = navbot_perception.detection_bpu:main",
             "depth_bpu = navbot_perception.depth_bpu:main",
-            "depth_freespace = navbot_perception.depth_freespace:main",
             "slam_rgbd = navbot_perception.slam_rgbd:main",
         ],
     },

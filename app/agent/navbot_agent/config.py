@@ -55,7 +55,7 @@ LAUNCH_STOP_SIGTERM_S = 3.0   # grace after SIGTERM before SIGKILL
 MODE_ACTIVE_TIMEOUT_S = 25.0  # /obstacles (or /estop service) must appear by then
 
 # Operator-togglable models/features. obstacle_avoidance gates safety_gate's
-# visual (PIDNet-derived) forward-block and defaults ON; the perception
+# sector (RPLidar scan_sectors) forward-block and defaults ON; the perception
 # overlays (yolo11, depthanything) default OFF — opt-in, cost BPU/bandwidth.
 MODELS = ("obstacle_avoidance", "yolo11", "depthanything")
 MODEL_ENABLE_TOPIC = {

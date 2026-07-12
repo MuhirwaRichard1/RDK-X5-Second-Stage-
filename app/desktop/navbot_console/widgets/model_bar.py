@@ -1,12 +1,11 @@
 """ModelBar — operator-togglable models/features. obstacle_avoidance gates
-safety_gate's visual (depth-derived — depth_freespace replaced PIDNet
-obstacle_fusion as the /obstacles publisher) forward-block and is a safety
+safety_gate's sector (RPLidar-derived — scan_sectors replaced the camera
+pipelines as the /obstacles publisher) forward-block and is a safety
 feature (off is drawn as a warning, not just "unchecked"). yolo11 and
 depthanything are perception overlays, independent of each other and of
 obstacle_avoidance: yolo11 lazy-loads on the BPU, depthanything toggles the
-depth HUD overlay only (depth_freespace itself always runs). Buttons
-disable while the mode stack isn't fully up — the nodes that own these
-toggles only exist once a mode is active."""
+depth HUD overlay only. Buttons disable while the mode stack isn't fully
+up — the nodes that own these toggles only exist once a mode is active."""
 
 from PySide6.QtCore import Signal
 from PySide6.QtWidgets import QHBoxLayout, QPushButton, QWidget

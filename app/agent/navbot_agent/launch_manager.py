@@ -117,7 +117,7 @@ class LaunchManager:
                                     "mode failed to start (see log)")
 
     async def _wait_active(self):
-        """Active = /obstacles is flowing (every mode runs obstacle_fusion)."""
+        """Active = /obstacles is flowing (every mode runs scan_sectors)."""
         n0 = self.bridge._counters["/obstacles"]
         deadline = time.monotonic() + config.MODE_ACTIVE_TIMEOUT_S
         while time.monotonic() < deadline:

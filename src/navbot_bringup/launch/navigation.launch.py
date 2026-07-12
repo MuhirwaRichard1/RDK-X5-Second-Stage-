@@ -1,11 +1,14 @@
 # Copyright (c) 2026 Ricardo Muhirwa — MIT License
 """
-navigation.launch.py — PIDNet-based reactive navigation stack.
+navigation.launch.py — lidar-based reactive navigation stack.
 
-    cameras (three_cam.launch.py)
-        -> obstacle_fusion  (PIDNet on BPU, 3 cams -> /obstacles)
+    cameras (three_cam.launch.py)   — operator video only, no obstacle role
+    RPLidar C1 (sllidar_node) -> /scan
+        -> scan_sectors     (/scan -> /obstacles sector classification;
+                             replaced the PIDNet/Depth-Anything camera
+                             pipelines — no BPU cost, works in the dark)
         -> local_planner    (/obstacles -> /cmd_vel)
-        -> safety_gate      (/cmd_vel + TF-Luna + /estop -> /cmd_vel_safe)
+        -> safety_gate      (/cmd_vel + /scan + /estop -> /cmd_vel_safe)
         -> motor_controller (only when motors:=true)
         -> detection_bpu    (YOLO11 on BPU, idle until /perception/yolo11_enable)
         -> depth_bpu        (Depth Anything on BPU, front cam only, idle
@@ -46,8 +49,17 @@ def generate_launch_description():
         cameras,
         Node(package="navbot_slam", executable="imu_driver",
              name="imu_driver", output="screen"),
-        Node(package="navbot_perception", executable="obstacle_fusion",
-             name="obstacle_fusion", output="screen"),
+        Node(package="sllidar_ros2", executable="sllidar_node",
+             name="sllidar_node", output="screen",
+             parameters=[{"channel_type": "serial",
+                          "serial_port": "/dev/ttyUSB0",
+                          "serial_baudrate": 460800,    # C1 fixed rate
+                          "frame_id": "laser",
+                          "inverted": False,
+                          "angle_compensate": True,
+                          "scan_mode": "Standard"}]),
+        Node(package="navbot_perception", executable="scan_sectors",
+             name="scan_sectors", output="screen"),
         Node(package="navbot_navigation", executable="local_planner",
              name="local_planner", output="screen"),
         Node(package="navbot_drive", executable="safety_gate",

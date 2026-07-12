@@ -11,6 +11,7 @@
   <exec_depend>navbot_perception</exec_depend>
   <exec_depend>navbot_navigation</exec_depend>
   <exec_depend>navbot_drive</exec_depend>
+  <exec_depend>sllidar_ros2</exec_depend>
 
   <export>
     <build_type>ament_python</build_type>

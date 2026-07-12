@@ -8,13 +8,17 @@ Pipeline:
                                                                          ▼
                        slam_toolbox (async mapping) ─► /map + map->odom + closures
 
-Like slam.launch.py (Track A, retired), this does NOT start the IMU or
-cameras — the agent's active mode publishes those. It subscribes to raw
-topics, so it works identically on the LIVE robot and on a replayed rosbag.
+Like slam.launch.py (Track A, retired), this does NOT start the sensors —
+the agent's active modes (manual/observe/auto) run the lidar driver, IMU and
+cameras. It subscribes to raw topics, so it works identically on the LIVE
+robot and on a replayed rosbag.
 
-  live mapping : ros2 launch navbot_slam lidar_slam.launch.py
+  live mapping : agent in an active mode, then
+                 ros2 launch navbot_slam lidar_slam.launch.py
+  standalone   : agent stopped -> add run_lidar:=true (starts sllidar here;
+                 double-starting it against an active mode fails on the port)
+                 and run imu_driver by hand for dr_odom
   bag replay   : ros2 launch navbot_slam lidar_slam.launch.py use_sim_time:=true
-                 (lidar driver auto-skipped; /scan comes from the bag)
                  + ros2 bag play <bag> --clock --rate 0.5
   record for offline build: /scan /imu/data /cmd_vel_safe /cmd_vel
 
@@ -44,9 +48,10 @@ def generate_launch_description():
     args = [
         DeclareLaunchArgument("use_sim_time", default_value="false",
                               description="true when replaying a bag with --clock"),
-        DeclareLaunchArgument("run_lidar", default_value="true",
-                              description="start the sllidar driver (ignored/"
-                                          "skipped when use_sim_time is true)"),
+        DeclareLaunchArgument("run_lidar", default_value="false",
+                              description="start the sllidar driver here — "
+                                          "only when the agent is stopped (its "
+                                          "active modes already run it)"),
         DeclareLaunchArgument("serial_port", default_value="/dev/ttyUSB0"),
         # rough base_link -> laser mount — MEASURE & override
         DeclareLaunchArgument("lidar_x", default_value="0.0"),

@@ -2,7 +2,7 @@
 """
 local_planner — reactive free-space navigation from /obstacles -> /cmd_vel.
 
-Subscribes : /obstacles (navbot_msgs/Sectors, from obstacle_fusion)
+Subscribes : /obstacles (navbot_msgs/Sectors, from scan_sectors)
 Publishes  : /cmd_vel (geometry_msgs/Twist) at `rate_hz` (default 20 Hz)
 
 Policy (per PROPOSAL): never command forward motion into a BLOCKED or
@@ -13,7 +13,7 @@ search (keeps the last direction to avoid dithering). Stale /obstacles
 (> stale_s) -> publish zero Twist.
 
 The Twist goes to safety_gate (-> /cmd_vel_safe -> motor_controller), which
-adds the TF-Luna hard stop and E-stop on top.
+adds the scan forward stop and E-stop on top.
 """
 
 import time
