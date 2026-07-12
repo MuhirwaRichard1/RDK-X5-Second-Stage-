@@ -39,8 +39,10 @@ import os
 _BY_PATH = "/dev/v4l/by-path/platform-xhci-hcd.2.auto-usb-0:{port}:1.0-video-index0"
 
 
-def _cam(ns, device, width, height, fps, pixel_format, calib_file=""):
+def _cam(ns, device, width, height, fps, pixel_format, calib_file="",
+         brightness=None):
     """One hobot_usb_cam node, namespaced, with image->image_raw remap."""
+    extra = {} if brightness is None else {"brightness": brightness}
     return Node(
         package="hobot_usb_cam",
         executable="hobot_usb_cam",
@@ -56,6 +58,7 @@ def _cam(ns, device, width, height, fps, pixel_format, calib_file=""):
             "io_method": "mmap",
             "zero_copy": False,
             "camera_calibration_file_path": calib_file,
+            **extra,
         }],
         remappings=[
             ("image", "image_raw"),
@@ -100,8 +103,13 @@ def generate_launch_description():
         # USB bandwidth); the 0bdc:8088 advertises 640x480 MJPEG @ 30 fps.
         _cam("cam_front", LaunchConfiguration("front_device"),
              640, 480, 30, "mjpeg", _calib("camera_front")),
+        # brightness: hobot_usb_cam writes its default (50) to the sensor on
+        # every open, which leaves the 1e45:8022 side cams dim (~60 mean luma
+        # vs the front's ~178). 170 matches the front (measured ~170 mean,
+        # 0% saturated pixels). The front cam is left alone — its pipeline
+        # exposes correctly on its own.
         _cam("cam_left", LaunchConfiguration("left_device"),
-             320, 240, 30, "yuyv", _calib("camera_left")),
+             320, 240, 30, "yuyv", _calib("camera_left"), brightness=170),
         _cam("cam_right", LaunchConfiguration("right_device"),
-             320, 240, 30, "yuyv", _calib("camera_right")),
+             320, 240, 30, "yuyv", _calib("camera_right"), brightness=170),
     ])
