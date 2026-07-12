@@ -65,11 +65,15 @@ def generate_launch_description():
                           "inverted": False,
                           "angle_compensate": True,
                           "scan_mode": "Standard"}]),
+        # MOUNT: the C1 sits with its laser-frame 0° facing the robot's REAR
+        # (found live 2026-07-13: front/back swapped) — 180° maps laser rays
+        # to robot bearings. Keep in sync with lidar_slam.launch.py lidar_yaw.
         Node(package="navbot_perception", executable="scan_sectors",
-             name="scan_sectors", output="screen"),
+             name="scan_sectors", output="screen",
+             parameters=[{"yaw_offset_deg": 180.0}]),
         Node(package="navbot_drive", executable="safety_gate",
              name="safety_gate", output="screen",
-             parameters=[{"assist": True}]),
+             parameters=[{"assist": True, "yaw_offset_deg": 180.0}]),
         Node(package="navbot_drive", executable="motor_controller",
              name="motor_controller", output="screen",
              condition=IfCondition(LaunchConfiguration("motors"))),
