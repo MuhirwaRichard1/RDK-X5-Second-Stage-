@@ -137,6 +137,32 @@ class AgentApp:
     def on_set_map(self, session, enable):
         session.wants_map = bool(enable)
 
+    def on_save_map(self, session, name):
+        """Save the live SLAM map to disk (both viewable .pgm/.yaml and
+        loadable .posegraph/.data). Requires slam_toolbox running (a mapping
+        mode). Result is reported back via the operator log."""
+        if not self.bridge:
+            session.send_json(protocol.error("map save unavailable (--no-ros)"))
+            return
+        base = str(name).strip() if name else config.DEFAULT_MAP
+        # keep it a basename — never let a client write outside MAP_DIR
+        base = base.replace("/", "_").replace("..", "_") or config.DEFAULT_MAP
+        self.add_log("agent", "info", f"saving map -> {base}")
+        self.bridge.save_map(base)
+
+    def on_set_goal(self, session, x, y):
+        """Publish a navigation goal (map frame) for goal_navigator."""
+        if not self.bridge:
+            session.send_json(protocol.error("goals unavailable (--no-ros)"))
+            return
+        try:
+            x, y = float(x), float(y)
+        except (TypeError, ValueError):
+            session.send_json(protocol.error("goal needs numeric x, y"))
+            return
+        self.add_log("agent", "info", f"goal -> ({x:.2f}, {y:.2f}) m")
+        self.bridge.set_goal(x, y)
+
     def on_client_gone(self, session):
         # Belt and braces: if the last teleop-capable client vanishes the
         # bridge staleness timer already zeros /cmd_vel within 400 ms.

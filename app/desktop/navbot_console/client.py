@@ -139,6 +139,15 @@ class RobotClient(QObject):
     def send_map(self, enable):
         self.send({"type": "set_map", "enable": bool(enable)})
 
+    def send_save_map(self, name=None):
+        msg = {"type": "save_map"}
+        if name:
+            msg["name"] = name
+        self.send(msg)
+
+    def send_goal(self, x, y):
+        self.send({"type": "set_goal", "x": float(x), "y": float(y)})
+
     def send_video(self, cam, enable, fps=None, quality=None):
         msg = {"type": "video", "cam": cam, "enable": bool(enable)}
         if fps:

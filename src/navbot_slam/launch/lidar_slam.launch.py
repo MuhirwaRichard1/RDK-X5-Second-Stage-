@@ -32,6 +32,13 @@ walls) — the EKF needs tuning before use; prefer icp until then.
                   + IMU gyro yaw. Survives feature-poor views icp can't; drifts.
   fused           icp translation + IMU gyro yaw via a robot_localization EKF
                   (needs tuning — see A/B note above).
+
+SLAM MODE — slam_mode:= (what slam_toolbox does with the scans):
+  mapping (default) build a fresh map (async node) -> /map + map->odom.
+  localization      load map_file:=<basename> and relocalize against it
+                    (localization node); this is also the kidnap relocalizer.
+  The bringup modes drive these: mapping.launch.py -> mapping,
+  autonav.launch.py -> localization.
 Exactly one node owns the odom->base_link TF in every mode; slam_toolbox always
 consumes that TF + /scan, so the three are drop-in interchangeable.
 
@@ -59,6 +66,8 @@ def generate_launch_description():
     use_sim_time = LaunchConfiguration("use_sim_time")
     run_lidar = LaunchConfiguration("run_lidar")
     odom_source = LaunchConfiguration("odom_source")
+    slam_mode = LaunchConfiguration("slam_mode")
+    map_file = LaunchConfiguration("map_file")
 
     args = [
         DeclareLaunchArgument("use_sim_time", default_value="false",
@@ -73,6 +82,16 @@ def generate_launch_description():
                                           "icp (laser scan-matching) is the "
                                           "default — A/B 2026-07-21 showed it "
                                           "maps far crisper than dead-reckoning."),
+        DeclareLaunchArgument("slam_mode", default_value="mapping",
+                              description="mapping = build a new map (async node); "
+                                          "localization = load map_file and "
+                                          "relocalize against it (also kidnap "
+                                          "recovery)."),
+        DeclareLaunchArgument(
+            "map_file",
+            default_value="/home/sunrise/rdk-x5-navbot/maps/arena_20260713",
+            description="pose-graph basename (no extension) loaded in "
+                        "slam_mode:=localization"),
         DeclareLaunchArgument("serial_port", default_value="/dev/ttyUSB0"),
         # rough base_link -> laser mount — MEASURE & override
         DeclareLaunchArgument("lidar_x", default_value="0.0"),
@@ -87,6 +106,11 @@ def generate_launch_description():
     def when(val):
         return IfCondition(PythonExpression(
             ["'", odom_source, "' == '", val, "'"]))
+
+    # slam_mode == <val> as a launch condition
+    def when_slam(val):
+        return IfCondition(PythonExpression(
+            ["'", slam_mode, "' == '", val, "'"]))
 
     # --- RPLidar C1 driver -> /scan (live only: a bag supplies /scan when
     # use_sim_time, and a wall-clock driver would corrupt sim-time SLAM) -----
@@ -153,14 +177,24 @@ def generate_launch_description():
         parameters=[os.path.join(cfg, "config", "ekf.yaml"), st],
         output="screen", condition=when("fused"))
 
-    # --- slam_toolbox: async mapper -> /map + map->odom ----------------------
-    slam = Node(
+    # --- slam_toolbox (mapping): async mapper -> /map + map->odom ------------
+    slam_map = Node(
         package="slam_toolbox", executable="async_slam_toolbox_node",
         name="slam_toolbox",
         parameters=[os.path.join(cfg, "config", "slam_toolbox.yaml"), st],
-        output="screen")
+        output="screen", condition=when_slam("mapping"))
+
+    # --- slam_toolbox (localization): load map_file, relocalize -> map->odom -
+    # (also the kidnap relocalizer). map_file_name is injected here from the
+    # map_file arg so one config serves any saved map.
+    slam_loc = Node(
+        package="slam_toolbox", executable="localization_slam_toolbox_node",
+        name="slam_toolbox",
+        parameters=[os.path.join(cfg, "config", "slam_toolbox_localization.yaml"),
+                    {"map_file_name": map_file}, st],
+        output="screen", condition=when_slam("localization"))
 
     return LaunchDescription(args + [
         lidar, tf_laser,
         dr_odom, icp_tf, icp_topic, tf_imu, ekf,
-        slam])
+        slam_map, slam_loc])

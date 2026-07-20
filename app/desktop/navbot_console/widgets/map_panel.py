@@ -52,6 +52,7 @@ class _MapView(QWidget):
 
 class MapPanel(QObject):
     mapToggled = Signal(bool)
+    saveRequested = Signal()
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -59,6 +60,10 @@ class MapPanel(QObject):
         self.toggle.setCheckable(True)
         self.toggle.setMinimumHeight(32)
         self.toggle.clicked.connect(self._on_click)
+        # Save the live SLAM map (needs a mapping mode running on the robot).
+        self.save_btn = QPushButton("SAVE MAP")
+        self.save_btn.setMinimumHeight(28)
+        self.save_btn.clicked.connect(lambda: self.saveRequested.emit())
         self.view = _MapView()
         self.set_connected(False)
 
@@ -78,6 +83,7 @@ class MapPanel(QObject):
 
     def set_connected(self, ok):
         self.toggle.setEnabled(ok)
+        self.save_btn.setEnabled(ok)
         if not ok:
             self.toggle.setChecked(False)
             self.toggle.setStyleSheet(_STYLE_OFF)

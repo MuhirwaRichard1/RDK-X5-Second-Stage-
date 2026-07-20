@@ -217,6 +217,10 @@ class WsServer:
                                   bool(msg.get("enable", True)), session)
         elif t == "set_map":
             self.app.on_set_map(session, bool(msg.get("enable", True)))
+        elif t == "save_map":
+            self.app.on_save_map(session, msg.get("name"))
+        elif t == "set_goal":
+            self.app.on_set_goal(session, msg.get("x"), msg.get("y"))
         # a repeated "hello" is harmless — ignore
 
 

@@ -76,6 +76,12 @@ VIDEO_JPEG_QUALITY = 70
 # changes a few times a second at most, and it's opt-in per session.
 MAP_PUSH_HZ = 1.0
 
+# Where saved maps live and the default basename the console "Save Map"
+# writes to (and autonav.launch.py loads for localization). save_map writes
+# both <base>.pgm/.yaml (viewable) and <base>.posegraph/.data (loadable).
+MAP_DIR = os.path.join(WS_ROOT, "maps")
+DEFAULT_MAP = "current"        # basename under MAP_DIR
+
 # Topics whose publish rate the telemetry reports.
 RATE_TOPICS = [
     "/cam_front/image_raw",

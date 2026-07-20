@@ -17,6 +17,7 @@ Safety:
     us detect and re-assert)."""
 
 import math
+import os
 import threading
 import time
 
@@ -28,11 +29,12 @@ from rclpy.node import Node
 from rclpy.qos import (QoSProfile, ReliabilityPolicy, DurabilityPolicy,
                        qos_profile_sensor_data)
 
-from geometry_msgs.msg import Twist
+from geometry_msgs.msg import PoseStamped, Twist
 from nav_msgs.msg import OccupancyGrid
 from sensor_msgs.msg import CompressedImage, Image, Imu, Range
 from std_msgs.msg import Bool
 from std_srvs.srv import SetBool
+from slam_toolbox.srv import SaveMap, SerializePoseGraph
 from navbot_msgs.msg import Detections, GridOverlay, Sectors
 
 from . import config, protocol
@@ -61,6 +63,8 @@ class RosBridge:
         self.attitude = None            # (roll°, pitch°, yaw°, yaw_rate°/s, t_mono)
         self.map_slot = None            # (data, width, height, res, ox, oy, seq, mono_ms)
         self.robot_pose = None          # (x, y, yaw_rad, t_mono) from map->base_link TF
+        self.pending_save = None        # map basename to save (set on asyncio thread)
+        self._goal = None               # (x, y, t_mono) newest nav goal, map frame
 
     # ---------------- lifecycle ----------------
 
@@ -98,6 +102,14 @@ class RosBridge:
 
     def set_model_enable(self, model, enable):
         self.model_intent = {**self.model_intent, model: bool(enable)}
+
+    def save_map(self, base):
+        """Request a map save (picked up by the executor thread's timer)."""
+        self.pending_save = base
+
+    def set_goal(self, x, y):
+        """Set the newest navigation goal (map frame); published by the node."""
+        self._goal = (float(x), float(y), time.monotonic())
 
     def reassert_models(self):
         """Force every model-enable topic to be republished on the next
@@ -179,10 +191,21 @@ class _AgentNode(Node):
         self._cmd_pub = self.create_publisher(Twist, "/cmd_vel", 10)
         self._estop_cli = self.create_client(SetBool, "/estop")
 
+        # SLAM map save (both viewable pgm/yaml and loadable posegraph/data)
+        # and navigation goal publishing.
+        self._save_map_cli = self.create_client(SaveMap, "/slam_toolbox/save_map")
+        self._serialize_cli = self.create_client(SerializePoseGraph,
+                                                 "/slam_toolbox/serialize_map")
+        self._save_wait = 0
+        self._goal_pub = self.create_publisher(PoseStamped, "/goal", latched)
+        self._goal_published_t = None
+
         self.create_timer(1.0 / config.TELEOP_RATE_HZ, self._teleop_tick)
         self.create_timer(0.1, self._estop_reconcile)
         self.create_timer(0.5, self._model_reconcile)
         self.create_timer(0.5, self._pose_tick)
+        self.create_timer(0.3, self._save_map_tick)
+        self.create_timer(0.2, self._goal_tick)
         self.get_logger().info("navbot_agent bridge node up")
 
     # ---------------- subscriptions ----------------
@@ -355,6 +378,61 @@ class _AgentNode(Node):
                          1.0 - 2.0 * (q.y * q.y + q.z * q.z))
         self.b.robot_pose = (t.transform.translation.x,
                              t.transform.translation.y, yaw, time.monotonic())
+
+    def _alog(self, level, text):
+        if self.b.app:
+            self.b._post(self.b.app.add_log, "agent", level, text)
+
+    def _save_map_tick(self):
+        base = self.b.pending_save
+        if base is None:
+            return
+        if not (self._save_map_cli.service_is_ready()
+                and self._serialize_cli.service_is_ready()):
+            self._save_wait += 1
+            if self._save_wait > 15:               # ~4.5 s of no slam_toolbox
+                self.b.pending_save = None
+                self._save_wait = 0
+                self._alog("error", "save_map: slam_toolbox not running "
+                                    "(start a mapping mode first)")
+            return
+        self._save_wait = 0
+        self.b.pending_save = None
+        try:
+            os.makedirs(config.MAP_DIR, exist_ok=True)
+        except OSError as e:
+            self._alog("error", f"save_map: {e}")
+            return
+        path = os.path.join(config.MAP_DIR, base)
+        req = SaveMap.Request()
+        req.name.data = path                       # -> <path>.pgm + .yaml
+        self._save_map_cli.call_async(req).add_done_callback(
+            lambda f, p=path: self._save_done("pgm/yaml", p, f))
+        sreq = SerializePoseGraph.Request()
+        sreq.filename = path                       # -> <path>.posegraph + .data
+        self._serialize_cli.call_async(sreq).add_done_callback(
+            lambda f, p=path: self._save_done("posegraph", p, f))
+
+    def _save_done(self, kind, path, fut):
+        try:
+            ok = fut.result().result == 0
+        except Exception as e:                                  # noqa: BLE001
+            ok, path = False, str(e)
+        self._alog("info" if ok else "error",
+                   f"map {kind} {'saved' if ok else 'FAILED'}: {path}")
+
+    def _goal_tick(self):
+        g = self.b._goal
+        if g is None or g[2] == self._goal_published_t:
+            return
+        self._goal_published_t = g[2]
+        msg = PoseStamped()
+        msg.header.stamp = self.get_clock().now().to_msg()
+        msg.header.frame_id = "map"
+        msg.pose.position.x = g[0]
+        msg.pose.position.y = g[1]
+        msg.pose.orientation.w = 1.0
+        self._goal_pub.publish(msg)
 
     def _estop_done(self, fut):
         self._estop_inflight_t = None

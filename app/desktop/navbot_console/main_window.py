@@ -90,6 +90,7 @@ class MainWindow(QMainWindow):
         right.addWidget(self.mode_bar)
         right.addWidget(self.model_bar)
         right.addWidget(self.map_panel.toggle)
+        right.addWidget(self.map_panel.save_btn)
         right.addWidget(self.estop)
         right.addWidget(self.joystick, 0, Qt.AlignHCenter)
         speed_row = QHBoxLayout()
@@ -153,6 +154,7 @@ class MainWindow(QMainWindow):
         self.mode_bar.modeRequested.connect(self.client.send_mode)
         self.model_bar.modelToggled.connect(self._on_model_toggled)
         self.map_panel.mapToggled.connect(self._on_map_toggled)
+        self.map_panel.saveRequested.connect(lambda: self.client.send_save_map())
         self.estop.estopRequested.connect(self.client.send_estop)
         self.joystick.moved.connect(self.teleop.joystick)
         self.teleop.commandChanged.connect(
