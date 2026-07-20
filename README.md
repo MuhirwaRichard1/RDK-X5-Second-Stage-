@@ -111,11 +111,19 @@ PC side: `pip install -r app/desktop/requirements.txt && python -m navbot_consol
 Details, protocol, and safety model: [docs/operator_app.md](docs/operator_app.md).
 
 ## Status
-Stage 2 deliverables complete. W1 bring-up **done and verified**: 3 cameras simultaneous
-(30/30/16 fps), `/imu/data` @ 100 Hz, motors, TF-Luna. Obstacle avoidance running via three
-BPU perception variants (PIDNet / YOLO11 / hybrid) + reactive ROS navigation stack
-(`/obstacles` @ 10 Hz, `/cmd_vel_safe` @ 20 Hz, E-stop). Next per roadmap: depth ≥ 5 FPS
-(recompile Depth Anything at smaller input), VIO SLAM.
+**Full mission working, console-driven.** Sensor architecture pivoted to an **RPLidar C1**
+for SLAM + obstacle avoidance (encoderless odometry comes from **laser scan-matching**,
+`icp_odometry`, not dead reckoning). The operator console drives the whole loop:
+
+- **MAPPING** — teleop-drive + `slam_toolbox` build a map, live in the MAP view; **SAVE MAP**.
+- **NAVIGATE** — `slam_toolbox` localization loads the saved map; **click the map to set a goal**
+  and `goal_navigator` drives there with reactive avoidance under an always-on safety gate;
+  a **lift is detected → RELOCALIZE** (kidnap recovery) → resume.
+
+Also done: 3 cameras simultaneous, `/imu/data` @ ~190 Hz, motors + duty↔velocity LUT,
+lidar obstacle avoidance (`scan_sectors`/`safety_gate`), E-stop.
+
+**Build & run it from zero: [NEXT_STEPS.md](NEXT_STEPS.md).**
 
 ## License
 MIT — see [LICENSE](LICENSE).
