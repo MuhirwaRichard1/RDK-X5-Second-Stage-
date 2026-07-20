@@ -41,12 +41,19 @@ WS_SETUP = os.path.join(WS_ROOT, "install/setup.bash")
 FORCE_MOTORS_OFF = False
 
 # mode name -> (launch file, motors). stopped = no launch process.
+# mapping = teleop + SLAM build. (navigate = localization + goal nav, added
+# in Phase 3 with autonav.launch.py.)
 MODES = {
-    "stopped": None,
-    "observe": ("navigation.launch.py", False),
-    "manual":  ("manual.launch.py", True),
-    "auto":    ("navigation.launch.py", True),
+    "stopped":  None,
+    "observe":  ("navigation.launch.py", False),
+    "manual":   ("manual.launch.py", True),
+    "auto":     ("navigation.launch.py", True),
+    "mapping":  ("mapping.launch.py", True),
 }
+
+# Modes in which the operator's teleop drives /cmd_vel (manual + mapping).
+# In navigate the goal_navigator drives; observe/auto have their own planner.
+TELEOP_MODES = ("manual", "mapping")
 
 LAUNCH_PKG = "navbot_bringup"
 LAUNCH_PIDFILE = "/run/navbot-agent.launch.pid"

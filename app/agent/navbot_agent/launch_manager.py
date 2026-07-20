@@ -103,9 +103,9 @@ class LaunchManager:
             f.write(str(self.proc.pid))            # pid == pgid (new session)
         self._log_task = asyncio.create_task(self._pump_logs(self.proc))
 
-        # Teleop only in manual mode; the E-stop reconciler re-asserts the
-        # operator latch on the fresh safety_gate automatically.
-        self.bridge.teleop_enabled = (mode == "manual")
+        # Teleop in the teleop modes (manual + mapping); the E-stop reconciler
+        # re-asserts the operator latch on the fresh safety_gate automatically.
+        self.bridge.teleop_enabled = (mode in config.TELEOP_MODES)
 
         if await self._wait_active():
             self.app.set_mode_state(mode, "active")
