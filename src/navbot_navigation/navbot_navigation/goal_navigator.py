@@ -17,6 +17,7 @@ Publishes:
 
 FSM per tick:
   no goal                         -> IDLE, stop
+  recent lift / scan jump         -> RELOCALIZE, rotate slowly to re-localize
   no/old map->base_link TF        -> LOST, stop (also the kidnapped state)
   within goal_tolerance           -> ARRIVED, stop, clear goal
   goal not ahead (|bearing|>align)-> rotate in place toward it
@@ -35,9 +36,12 @@ from rclpy.qos import QoSProfile, ReliabilityPolicy, DurabilityPolicy
 import tf2_ros
 
 from geometry_msgs.msg import PoseStamped, Twist
+from sensor_msgs.msg import Imu, LaserScan
 from std_msgs.msg import String
 
 from navbot_msgs.msg import Sectors
+
+_G = 9.80665            # m/s^2 — stationary accel magnitude
 
 
 def _wrap(a):
@@ -61,6 +65,13 @@ class GoalNavigator(Node):
         self.declare_parameter("obstacles_stale_s", 0.5)
         self.declare_parameter("map_frame", "map")
         self.declare_parameter("base_frame", "base_link")
+        # kidnap recovery: an accel spike (lift/set-down) or a big scan jump
+        # triggers a RELOCALIZE window — stop navigating, rotate slowly to feed
+        # slam_toolbox localization until it re-converges, then resume.
+        self.declare_parameter("lift_accel_thresh", 4.0)   # m/s^2 off gravity
+        self.declare_parameter("scan_jump_thresh", 0.6)    # m mean-range jump
+        self.declare_parameter("relocalize_time_s", 5.0)   # spin-recover window
+        self.declare_parameter("relocalize_wz", 0.5)       # rad/s recover spin
 
         g = lambda n: self.get_parameter(n).value  # noqa: E731
         self.v_max, self.w_max = g("v_max"), g("w_max")
@@ -74,12 +85,18 @@ class GoalNavigator(Node):
         self.obst_stale_s = g("obstacles_stale_s")
         self.map_frame = g("map_frame")
         self.base_frame = g("base_frame")
+        self.lift_thresh = g("lift_accel_thresh")
+        self.scan_jump = g("scan_jump_thresh")
+        self.reloc_time = g("relocalize_time_s")
+        self.reloc_wz = g("relocalize_wz")
 
         self.goal = None                # (x, y) in map frame
         self.sectors = None
         self.sectors_t = 0.0
         self.search_dir = 1.0
         self.state = ""
+        self._disturb_t = None          # last lift/scan-jump disturbance time
+        self._last_scan_mean = None
 
         self._tf_buffer = tf2_ros.Buffer()
         self._tf_listener = tf2_ros.TransformListener(self._tf_buffer, self)
@@ -88,6 +105,8 @@ class GoalNavigator(Node):
                              durability=DurabilityPolicy.TRANSIENT_LOCAL)
         self.create_subscription(PoseStamped, "/goal", self._on_goal, latched)
         self.create_subscription(Sectors, "/obstacles", self._on_sectors, 10)
+        self.create_subscription(Imu, "/imu/data", self._on_imu, 10)
+        self.create_subscription(LaserScan, "/scan", self._on_scan, 10)
         self.pub = self.create_publisher(Twist, "/cmd_vel", 10)
         self.state_pub = self.create_publisher(String, "/behaviour/state", latched)
 
@@ -103,6 +122,29 @@ class GoalNavigator(Node):
     def _on_sectors(self, msg):
         self.sectors = msg
         self.sectors_t = self._now()
+
+    def _on_imu(self, msg):
+        """A lift or set-down shows up as an accel magnitude far from 1 g."""
+        a = msg.linear_acceleration
+        mag = math.sqrt(a.x * a.x + a.y * a.y + a.z * a.z)
+        if abs(mag - _G) > self.lift_thresh:
+            self._disturb_t = self._now()
+
+    def _on_scan(self, msg):
+        """A big jump in mean range = the world around us changed suddenly
+        (carried elsewhere) — corroborates a kidnap."""
+        vals = [r for r in msg.ranges if math.isfinite(r) and r > 0.0]
+        if not vals:
+            return
+        mean = sum(vals) / len(vals)
+        if self._last_scan_mean is not None \
+                and abs(mean - self._last_scan_mean) > self.scan_jump:
+            self._disturb_t = self._now()
+        self._last_scan_mean = mean
+
+    def _relocalizing(self):
+        return (self._disturb_t is not None
+                and self._now() - self._disturb_t < self.reloc_time)
 
     def _now(self):
         return self.get_clock().now().nanoseconds * 1e-9
@@ -173,6 +215,14 @@ class GoalNavigator(Node):
 
         if self.goal is None:
             self._set_state("IDLE")
+            self.pub.publish(cmd)
+            return
+
+        # kidnap recovery: a recent lift/scan-jump -> stop navigating and rotate
+        # slowly so slam_toolbox localization re-matches the map, then resume.
+        if self._relocalizing():
+            self._set_state("RELOCALIZE")
+            cmd.angular.z = self.reloc_wz
             self.pub.publish(cmd)
             return
 

@@ -25,6 +25,7 @@ from rclpy.qos import QoSProfile, ReliabilityPolicy, DurabilityPolicy
 
 import tf2_ros
 from geometry_msgs.msg import PoseStamped, Twist, TransformStamped
+from sensor_msgs.msg import Imu
 from navbot_msgs.msg import Sectors
 from navbot_navigation.goal_navigator import GoalNavigator
 
@@ -56,6 +57,7 @@ class Harness(Node):
                              durability=DurabilityPolicy.TRANSIENT_LOCAL)
         self._obst = self.create_publisher(Sectors, "/obstacles", 10)
         self._goal = self.create_publisher(PoseStamped, "/goal", latched)
+        self._imu = self.create_publisher(Imu, "/imu/data", 10)
         self.create_subscription(Twist, "/cmd_vel", self._on_cmd, 10)
         self._tf = tf2_ros.TransformBroadcaster(self)
         self.create_timer(0.05, self._tick)      # 20 Hz feed
@@ -89,6 +91,13 @@ class Harness(Node):
         g.pose.position.x, g.pose.position.y = float(x), float(y)
         g.pose.orientation.w = 1.0
         self._goal.publish(g)
+
+    def inject_lift(self):
+        """Publish one IMU sample with accel far from 1 g (a lift/set-down)."""
+        m = Imu()
+        m.header.stamp = self.get_clock().now().to_msg()
+        m.linear_acceleration.z = 2.0        # ~7.8 m/s^2 off gravity
+        self._imu.publish(m)
 
 
 def main():
@@ -136,6 +145,20 @@ def main():
     results.append(run("ARRIVED (within tolerance)", (0.0, 0.0, 0.0),
                        all_free(), (0.05, 0.0),
                        lambda vx, az: abs(vx) < 1e-6 and abs(az) < 1e-6))
+
+    # KIDNAP: navigating a clear goal, then a lift -> RELOCALIZE (spin, no drive)
+    h.pose = (0.0, 0.0, 0.0)
+    h.status = all_free()
+    h.set_goal(2.0, 0.0)
+    time.sleep(0.5)                      # driving forward
+    h.last_cmd = None
+    h.inject_lift()
+    time.sleep(0.5)                      # inside the relocalize window
+    vx, az = h.last_cmd if h.last_cmd else (None, None)
+    ok = h.last_cmd is not None and vx < 0.02 and abs(az - 0.5) < 0.2
+    print(f"[{'PASS' if ok else 'FAIL'}] KIDNAP (lift -> relocalize): "
+          f"vx={vx}, az={az}")
+    results.append(ok)
 
     ex.shutdown()
     nav.destroy_node()
