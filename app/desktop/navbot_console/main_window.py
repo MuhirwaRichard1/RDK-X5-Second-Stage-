@@ -155,6 +155,7 @@ class MainWindow(QMainWindow):
         self.model_bar.modelToggled.connect(self._on_model_toggled)
         self.map_panel.mapToggled.connect(self._on_map_toggled)
         self.map_panel.saveRequested.connect(lambda: self.client.send_save_map())
+        self.map_panel.goalPicked.connect(self.client.send_goal)
         self.estop.estopRequested.connect(self.client.send_estop)
         self.joystick.moved.connect(self.teleop.joystick)
         self.teleop.commandChanged.connect(

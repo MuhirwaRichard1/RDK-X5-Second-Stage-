@@ -1,0 +1,250 @@
+#!/usr/bin/env python3
+"""
+goal_navigator — drive to a map-frame goal, avoiding obstacles.
+
+The autonomous counterpart to local_planner: instead of just seeking open
+space, it seeks a GOAL while reusing the same widest-free-run avoidance so it
+never drives forward into a BLOCKED/UNKNOWN sector. Runs in the "navigate"
+mode alongside slam_toolbox localization (which supplies map->base_link).
+
+Subscribes:
+  /goal       geometry_msgs/PoseStamped  (map frame — from the console click)
+  /obstacles  navbot_msgs/Sectors        (robot-frame free-space, scan_sectors)
+  TF map->base_link                       (robot pose; localization + icp odom)
+Publishes:
+  /cmd_vel          geometry_msgs/Twist   (-> safety_gate -> /cmd_vel_safe)
+  /behaviour/state  std_msgs/String       (IDLE/NAVIGATE/AVOID/ARRIVED/LOST)
+
+FSM per tick:
+  no goal                         -> IDLE, stop
+  no/old map->base_link TF        -> LOST, stop (also the kidnapped state)
+  within goal_tolerance           -> ARRIVED, stop, clear goal
+  goal not ahead (|bearing|>align)-> rotate in place toward it
+  goal ahead & cone FREE          -> drive toward it (P heading, v scaled by dist)
+  goal ahead but blocked          -> AVOID: steer to the widest FREE run
+  nowhere free                    -> rotate-search (keeps last direction)
+
+safety_gate stays underneath untouched (scan hard-stop + proximity + E-stop).
+"""
+
+import math
+
+import rclpy
+from rclpy.node import Node
+from rclpy.qos import QoSProfile, ReliabilityPolicy, DurabilityPolicy
+import tf2_ros
+
+from geometry_msgs.msg import PoseStamped, Twist
+from std_msgs.msg import String
+
+from navbot_msgs.msg import Sectors
+
+
+def _wrap(a):
+    return math.atan2(math.sin(a), math.cos(a))
+
+
+class GoalNavigator(Node):
+    def __init__(self):
+        super().__init__("goal_navigator")
+
+        self.declare_parameter("rate_hz", 15.0)
+        self.declare_parameter("v_max", 0.22)           # m/s forward
+        self.declare_parameter("w_max", 1.0)            # rad/s
+        self.declare_parameter("goal_tolerance", 0.15)  # m -> ARRIVED
+        self.declare_parameter("heading_align", 0.35)   # rad; drive only if aligned
+        self.declare_parameter("steer_gain", 1.5)       # w per rad bearing error
+        self.declare_parameter("front_cone_deg", 25.0)  # must be FREE to drive
+        self.declare_parameter("min_run_deg", 25.0)     # narrower FREE runs ignored
+        self.declare_parameter("slow_dist", 0.6)        # m; scale v down inside this
+        self.declare_parameter("pose_stale_s", 1.0)     # no TF this long -> LOST
+        self.declare_parameter("obstacles_stale_s", 0.5)
+        self.declare_parameter("map_frame", "map")
+        self.declare_parameter("base_frame", "base_link")
+
+        g = lambda n: self.get_parameter(n).value  # noqa: E731
+        self.v_max, self.w_max = g("v_max"), g("w_max")
+        self.tol = g("goal_tolerance")
+        self.align = g("heading_align")
+        self.k = g("steer_gain")
+        self.front_cone = math.radians(g("front_cone_deg"))
+        self.min_run = math.radians(g("min_run_deg"))
+        self.slow_dist = g("slow_dist")
+        self.pose_stale_s = g("pose_stale_s")
+        self.obst_stale_s = g("obstacles_stale_s")
+        self.map_frame = g("map_frame")
+        self.base_frame = g("base_frame")
+
+        self.goal = None                # (x, y) in map frame
+        self.sectors = None
+        self.sectors_t = 0.0
+        self.search_dir = 1.0
+        self.state = ""
+
+        self._tf_buffer = tf2_ros.Buffer()
+        self._tf_listener = tf2_ros.TransformListener(self._tf_buffer, self)
+
+        latched = QoSProfile(depth=1, reliability=ReliabilityPolicy.RELIABLE,
+                             durability=DurabilityPolicy.TRANSIENT_LOCAL)
+        self.create_subscription(PoseStamped, "/goal", self._on_goal, latched)
+        self.create_subscription(Sectors, "/obstacles", self._on_sectors, 10)
+        self.pub = self.create_publisher(Twist, "/cmd_vel", 10)
+        self.state_pub = self.create_publisher(String, "/behaviour/state", latched)
+
+        self.create_timer(1.0 / g("rate_hz"), self._tick)
+        self.get_logger().info("goal_navigator up -> /cmd_vel (waiting for /goal)")
+
+    # ------------------------------------------------------------------ #
+    def _on_goal(self, msg):
+        self.goal = (msg.pose.position.x, msg.pose.position.y)
+        self.get_logger().info(
+            f"new goal ({self.goal[0]:.2f}, {self.goal[1]:.2f}) [{msg.header.frame_id}]")
+
+    def _on_sectors(self, msg):
+        self.sectors = msg
+        self.sectors_t = self._now()
+
+    def _now(self):
+        return self.get_clock().now().nanoseconds * 1e-9
+
+    def _pose(self):
+        """map->base_link as (x, y, yaw), or None if unavailable/stale."""
+        try:
+            t = self._tf_buffer.lookup_transform(
+                self.map_frame, self.base_frame, rclpy.time.Time())
+        except (tf2_ros.LookupException, tf2_ros.ConnectivityException,
+                tf2_ros.ExtrapolationException):
+            return None
+        q = t.transform.rotation
+        yaw = math.atan2(2.0 * (q.w * q.z + q.x * q.y),
+                         1.0 - 2.0 * (q.y * q.y + q.z * q.z))
+        return (t.transform.translation.x, t.transform.translation.y, yaw)
+
+    def _sector_free(self, bearing, half):
+        """True if every sector overlapping [bearing-half, bearing+half] is
+        FREE. Bearings outside the sector FOV return False (can't confirm)."""
+        msg = self.sectors
+        if msg is None or self._now() - self.sectors_t > self.obst_stale_s:
+            return False
+        n = len(msg.status)
+        if n == 0:
+            return False
+        width = (msg.angle_max - msg.angle_min) / n
+        lo, hi = bearing - half, bearing + half
+        if lo < msg.angle_min or hi > msg.angle_max:
+            return False
+        i0 = max(0, int((lo - msg.angle_min) / width))
+        i1 = min(n - 1, int((hi - msg.angle_min) / width))
+        return all(msg.status[i] == Sectors.FREE for i in range(i0, i1 + 1))
+
+    def _best_run(self):
+        """(centre, width) of the widest FREE sector run >= min_run, or None.
+        Mirrors local_planner._best_run so avoidance behaves identically."""
+        msg = self.sectors
+        if msg is None or self._now() - self.sectors_t > self.obst_stale_s:
+            return None
+        status = msg.status
+        n = len(status)
+        if n == 0:
+            return None
+        width = (msg.angle_max - msg.angle_min) / n
+        best, run_start = None, None
+        for i in range(n + 1):
+            if i < n and status[i] == Sectors.FREE:
+                if run_start is None:
+                    run_start = i
+                continue
+            if run_start is not None:
+                lo = msg.angle_min + run_start * width
+                hi = msg.angle_min + i * width
+                if best is None or hi - lo > best[1]:
+                    best = ((lo + hi) / 2.0, hi - lo)
+                run_start = None
+        return best if best and best[1] >= self.min_run else None
+
+    def _set_state(self, s):
+        if s != self.state:
+            self.state = s
+            self.state_pub.publish(String(data=s))
+            self.get_logger().info(f"state -> {s}")   # surfaces in console log
+
+    def _tick(self):
+        cmd = Twist()
+
+        if self.goal is None:
+            self._set_state("IDLE")
+            self.pub.publish(cmd)
+            return
+
+        pose = self._pose()
+        if pose is None:
+            self._set_state("LOST")          # no localization / kidnapped
+            self.pub.publish(cmd)
+            return
+
+        rx, ry, ryaw = pose
+        dx, dy = self.goal[0] - rx, self.goal[1] - ry
+        dist = math.hypot(dx, dy)
+        if dist <= self.tol:
+            self._set_state("ARRIVED")
+            self.goal = None                 # latch; a new /goal re-arms us
+            self.pub.publish(cmd)
+            return
+
+        bearing = _wrap(math.atan2(dy, dx) - ryaw)   # robot-frame angle to goal
+
+        # not facing the goal -> rotate in place toward it (any bearing, incl.
+        # behind us or outside the sector FOV; rotation always passes safety)
+        if abs(bearing) > self.align:
+            self._set_state("NAVIGATE")
+            cmd.angular.z = float(_clip(self.k * bearing, -self.w_max, self.w_max))
+            self.search_dir = 1.0 if bearing >= 0 else -1.0
+            self.pub.publish(cmd)
+            return
+
+        # aligned: drive toward the goal if the cone that way is FREE
+        if self._sector_free(bearing, self.front_cone):
+            self._set_state("NAVIGATE")
+            cmd.linear.x = self.v_max * _clip(dist / self.slow_dist, 0.15, 1.0)
+            cmd.angular.z = float(_clip(self.k * bearing, -self.w_max, self.w_max))
+            self.pub.publish(cmd)
+            return
+
+        # blocked toward the goal -> detour via the widest FREE run
+        run = self._best_run()
+        if run is None:                      # nowhere free -> rotate-search
+            self._set_state("AVOID")
+            cmd.angular.z = self.search_dir * self.w_max * 0.6
+            self.pub.publish(cmd)
+            return
+        self._set_state("AVOID")
+        centre, width = run
+        self.search_dir = 1.0 if centre >= 0 else -1.0
+        lo, hi = centre - width / 2.0, centre + width / 2.0
+        if lo <= -self.front_cone and hi >= self.front_cone:
+            cmd.linear.x = self.v_max * 0.5
+            cmd.angular.z = float(_clip(self.k * centre, -self.w_max, self.w_max))
+        else:
+            cmd.angular.z = (float(_clip(self.k * centre, -self.w_max, self.w_max))
+                             or self.search_dir * 0.5)
+        self.pub.publish(cmd)
+
+
+def _clip(v, lo, hi):
+    return lo if v < lo else hi if v > hi else v
+
+
+def main(args=None):
+    rclpy.init(args=args)
+    node = GoalNavigator()
+    try:
+        rclpy.spin(node)
+    except KeyboardInterrupt:
+        pass
+    finally:
+        node.destroy_node()
+        rclpy.try_shutdown()
+
+
+if __name__ == "__main__":
+    main()

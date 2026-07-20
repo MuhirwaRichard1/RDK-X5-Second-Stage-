@@ -5,7 +5,7 @@ from PySide6.QtCore import Signal
 from PySide6.QtWidgets import (QButtonGroup, QHBoxLayout, QLabel,
                                QPushButton, QVBoxLayout, QWidget)
 
-_MODES = ("stopped", "observe", "manual", "auto", "mapping")
+_MODES = ("stopped", "observe", "manual", "auto", "mapping", "navigate")
 _LAMP = {True: "background:#00c853;color:black;border-radius:9px;padding:4px 10px;font-weight:bold;",
          False: "background:#444;color:#aaa;border-radius:9px;padding:4px 10px;"}
 

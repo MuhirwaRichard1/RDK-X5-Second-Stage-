@@ -88,4 +88,7 @@ class MapPump:
                 continue
             last_seq = seq
             b64 = base64.b64encode(png).decode("ascii")
-            self.hub.send_map(protocol.map_msg(seq, slot[1], slot[2], b64))
+            # slot = (data, width, height, resolution, origin_x, origin_y, seq, ..)
+            self.hub.send_map(protocol.map_msg(
+                seq, slot[1], slot[2], b64,
+                resolution=slot[3], origin_x=slot[4], origin_y=slot[5]))

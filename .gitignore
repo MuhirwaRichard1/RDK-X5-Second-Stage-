@@ -11,6 +11,14 @@ bags/
 models/*.bin
 !models/.gitkeep
 
+# Operator working map (SAVE MAP target, loaded by navigate) + A/B scratch maps.
+# The committed arena_20260713.* is the seed — copy it to current.* on a fresh
+# checkout (see NEXT_STEPS.md) or just map + SAVE MAP once.
+maps/current.*
+maps/ab_dr.*
+maps/ab_icp.*
+maps/ab_fused.*
+
 # Claude Code local settings (personal, not shared)
 .claude/settings.local.json
 

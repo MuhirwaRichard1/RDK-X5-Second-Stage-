@@ -41,14 +41,14 @@ WS_SETUP = os.path.join(WS_ROOT, "install/setup.bash")
 FORCE_MOTORS_OFF = False
 
 # mode name -> (launch file, motors). stopped = no launch process.
-# mapping = teleop + SLAM build. (navigate = localization + goal nav, added
-# in Phase 3 with autonav.launch.py.)
+# mapping = teleop + SLAM build; navigate = localization + goal navigation.
 MODES = {
     "stopped":  None,
     "observe":  ("navigation.launch.py", False),
     "manual":   ("manual.launch.py", True),
     "auto":     ("navigation.launch.py", True),
     "mapping":  ("mapping.launch.py", True),
+    "navigate": ("autonav.launch.py", True),
 }
 
 # Modes in which the operator's teleop drives /cmd_vel (manual + mapping).

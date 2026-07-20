@@ -106,12 +106,16 @@ def detections(camera, boxes):
             "boxes": boxes}
 
 
-def map_msg(seq, width, height, png_b64):
+def map_msg(seq, width, height, png_b64, resolution=0.0,
+            origin_x=0.0, origin_y=0.0):
     """SLAM occupancy-grid snapshot, rendered agent-side to a small grayscale
     PNG (robot marker already baked in when a fresh map->base_link TF is
-    available) — the desktop just decodes and displays."""
+    available) — the desktop just decodes and displays. resolution + origin let
+    the console turn a pixel click into a map-frame (x, y) goal. The PNG is
+    flipped so image-up = world +y (see map_pump._render)."""
     return {"v": PROTO_VERSION, "type": "map", "seq": seq,
-            "width": width, "height": height, "png_b64": png_b64}
+            "width": width, "height": height, "png_b64": png_b64,
+            "resolution": resolution, "origin_x": origin_x, "origin_y": origin_y}
 
 
 def attitude(roll_deg, pitch_deg, yaw_deg, yaw_rate_dps):

@@ -20,7 +20,7 @@ setup(
     entry_points={
         "console_scripts": [
             "local_planner = navbot_navigation.local_planner:main",
-            # behaviour_manager to be added (see README / ROADMAP W5)
+            "goal_navigator = navbot_navigation.goal_navigator:main",
         ],
     },
 )
