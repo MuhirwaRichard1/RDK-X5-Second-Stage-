@@ -89,6 +89,20 @@ MAP_PUSH_HZ = 1.0
 MAP_DIR = os.path.join(WS_ROOT, "maps")
 DEFAULT_MAP = "current"        # basename under MAP_DIR
 
+# Localization readout (telemetry `odom` block). mapping/navigate both run
+# icp_odometry (odom->base_link on /odom); navigate adds slam_toolbox
+# localization (map->odom). The agent watches the odom topics to report which
+# backbone is live, and the map->base_link fix age to flag lost tracking — so
+# the console shows "icp · localized" vs "icp · POSE LOST" (relocalizing).
+ODOM_SOURCE_TOPICS = {
+    "fused": "/odometry/filtered",   # robot_localization EKF (odom_source:=fused)
+    "icp": "/odom",                  # rtabmap icp_odometry (mapping/navigate default)
+    "dr": "/odom_dr",                # dead-reckoning fallback
+}
+ODOM_SOURCE_PRIORITY = ("fused", "icp", "dr")   # if >1 live, report this order
+ODOM_FRESH_S = 1.0        # an odom topic counts as the live source within this
+POSE_STALE_S = 1.5        # map->base_link older than this = tracking/localization lost
+
 # Topics whose publish rate the telemetry reports.
 RATE_TOPICS = [
     "/cam_front/image_raw",

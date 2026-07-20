@@ -3,6 +3,11 @@
 from PySide6.QtWidgets import (QFormLayout, QGroupBox, QLabel, QProgressBar,
                                QVBoxLayout, QWidget)
 
+# map->base_link fix older than this (ms) = SLAM lost track (agent POSE_STALE_S).
+_POSE_STALE_MS = 1500
+_ODOM_LABELS = {"icp": "icp (scan-match)", "dr": "dr (dead-reckon)",
+                "fused": "fused (icp+gyro)"}
+
 _RATE_ROWS = [("/cam_front/image_raw", "front cam", 25.0),
               ("/cam_left/image_raw", "left cam", 10.0),
               ("/cam_right/image_raw", "right cam", 10.0),
@@ -30,11 +35,13 @@ class HealthPanel(QWidget):
         self._cpu, self._mem, self._bpu = _bar(), _bar(), _bar()
         self._temps = QLabel("—")
         self._wifi = QLabel("—")
+        self._slam = QLabel("—")
         self._rates = {}
 
         vitals = QGroupBox("robot vitals")
         f = QFormLayout(vitals)
         f.addRow("forward range", self._range)
+        f.addRow("SLAM odom", self._slam)
         f.addRow("link RTT", self._latency)
         f.addRow("teleop age", self._teleop_age)
         f.addRow("CPU", self._cpu)
@@ -75,12 +82,33 @@ class HealthPanel(QWidget):
         self._temps.setText("  ".join(temps) or "—")
         wifi = t.get("wifi_dbm")
         self._wifi.setText(f"{wifi} dBm" if wifi is not None else "—")
+        self._set_slam(t.get("odom") or {})
         rates = t.get("rates", {})
         for topic, label, min_ok in _RATE_ROWS:
             v = rates.get(topic)
             lab = self._rates[topic]
             lab.setText(f"{v:.1f}" if v is not None else "—")
             lab.setStyleSheet("" if (v or 0) >= min_ok else "color:#999;")
+
+    def _set_slam(self, odom):
+        """Show the live SLAM odom source and whether it has a fresh fix.
+        source None = SLAM not running; pose age stale = localization lost."""
+        source = odom.get("source")
+        if not source:
+            self._slam.setText("off")
+            self._slam.setStyleSheet("color:#999;")
+            return
+        name = _ODOM_LABELS.get(source, source)
+        age = odom.get("pose_age_ms")
+        if age is None:
+            self._slam.setText(f"{name} · no fix")
+            self._slam.setStyleSheet("color:#ffb300;font-weight:bold;")
+        elif age > _POSE_STALE_MS:
+            self._slam.setText(f"{name} · LOST")
+            self._slam.setStyleSheet("color:#ff5555;font-weight:bold;")
+        else:
+            self._slam.setText(f"{name} · localized")
+            self._slam.setStyleSheet("color:#00c853;")
 
     def on_latency(self, ms):
         self._latency.setText(f"{ms:.0f} ms · {self._transport}")

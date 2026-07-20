@@ -137,6 +137,7 @@ class MainWindow(QMainWindow):
         self.client.welcomeReceived.connect(self._on_welcome)
         self.client.stateReceived.connect(self._on_state)
         self.client.telemetryReceived.connect(self.health.on_telemetry)
+        self.client.telemetryReceived.connect(self.map_panel.on_telemetry)
         self.client.latencyMs.connect(self.health.on_latency)
         self.client.transportChanged.connect(self.health.on_transport)
         self.client.sectorsReceived.connect(self.video.on_sectors)

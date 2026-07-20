@@ -82,9 +82,13 @@ def state_msg(state):
     return {"v": PROTO_VERSION, "type": "state", **state}
 
 
-def telemetry(rates, range_cm, health, teleop_age_ms):
+def telemetry(rates, range_cm, health, teleop_age_ms, odom=None):
+    """`odom` = {"source": "icp"|"dr"|"fused"|None, "pose_age_ms": int|None} —
+    the live SLAM odom backbone and how fresh the map->base_link fix is, so the
+    console can show the source and flag lost localization (see map_panel)."""
     return {"v": PROTO_VERSION, "type": "telemetry", "rates": rates,
-            "range_cm": range_cm, "teleop_age_ms": teleop_age_ms, **health}
+            "range_cm": range_cm, "teleop_age_ms": teleop_age_ms,
+            "odom": odom or {}, **health}
 
 
 def sectors(angle_min, angle_max, status, free):

@@ -92,7 +92,12 @@ video. First client message must be `hello`.
  "motors":true,"estop":{"latched":true,"confirmed":true},"detail":"..."}
 {"type":"telemetry", ...}                            // 2 Hz: rates{topic:Hz},
     // range_cm (null = unreadable/stale), teleop_age_ms, cpu, mem,
-    // temp_cpu_c, temp_ddr_c, bpu_pct, wifi_dbm
+    // temp_cpu_c, temp_ddr_c, bpu_pct, wifi_dbm,
+    // odom:{source:"icp"|"dr"|"fused"|null, pose_age_ms:int|null}
+    //   source = live SLAM odom backbone (null = no SLAM mode running);
+    //   pose_age_ms = age of last map->base_link fix (null = never localized,
+    //   > 1500 = tracking/localization lost). Console shows it in the health
+    //   panel + a POSE-LOST badge on the map (relocalizing in navigate/kidnap).
 {"type":"sectors","angle_min":-2.268,"angle_max":2.268,
  "status":[0,1,2,...],"free":[0.0,0.83,...]}         // /obstacles relay @10 Hz
 {"type":"log","src":"launch|agent","level":"info|warn|error","line":"..."}

@@ -14,13 +14,17 @@ tracks the map as it pans/grows."""
 
 import base64
 
-from PySide6.QtCore import QObject, Qt, Signal
-from PySide6.QtGui import QColor, QImage, QPainter, QPen
+from PySide6.QtCore import QObject, QRect, Qt, Signal
+from PySide6.QtGui import QColor, QFont, QImage, QPainter, QPen
 from PySide6.QtWidgets import QPushButton, QSizePolicy, QWidget
 
 _STYLE_ON = "background:#00c853;color:black;font-weight:bold;"
 _STYLE_OFF = ""
 _GOAL_COLOR = QColor(0, 200, 0)
+
+# map->base_link fix older than this (ms) = SLAM lost track (agent POSE_STALE_S).
+_POSE_STALE_MS = 1500
+_ODOM_LABELS = {"icp": "icp", "dr": "dr", "fused": "fused"}
 
 
 class _MapView(QWidget):
@@ -31,6 +35,8 @@ class _MapView(QWidget):
         self._image = None
         self._draw = None                   # (x_off, y_off, sw, sh, img_w, img_h)
         self._goal_px = None                # (col, row) image-pixel goal marker
+        self._source = None                 # live SLAM odom backbone, or None
+        self._pose_age_ms = None            # age of last fix; None = never localized
         self.setMinimumSize(160, 160)
         self.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
 
@@ -45,11 +51,27 @@ class _MapView(QWidget):
         self._goal_px = colrow
         self.update()
 
+    def set_loc(self, source, pose_age_ms):
+        self._source, self._pose_age_ms = source, pose_age_ms
+        if self._image:
+            self.update()
+
     def clear(self):
         self._image = None
         self._draw = None
         self._goal_px = None
         self.update()
+
+    def _loc_badge(self):
+        """(text, color) when localization needs flagging, else None."""
+        if not self._source:
+            return None                      # no SLAM odom running — no map anyway
+        name = _ODOM_LABELS.get(self._source, self._source)
+        if self._pose_age_ms is None:
+            return f"{name} · NO FIX", QColor(255, 179, 0)
+        if self._pose_age_ms > _POSE_STALE_MS:
+            return f"{name} · POSE LOST", QColor(229, 57, 53)
+        return None                          # localized — marker + health row say it
 
     def paintEvent(self, _ev):
         p = QPainter(self)
@@ -72,6 +94,21 @@ class _MapView(QWidget):
             p.setPen(QPen(_GOAL_COLOR, 2))
             p.drawLine(gx - 6, gy, gx + 6, gy)
             p.drawLine(gx, gy - 6, gx, gy + 6)
+        badge = self._loc_badge()
+        if badge:
+            self._paint_badge(p, rect, *badge)
+
+    def _paint_badge(self, p, rect, text, color):
+        f = QFont()
+        f.setBold(True)
+        f.setPointSize(11)
+        p.setFont(f)
+        fm = p.fontMetrics()
+        chip = QRect(rect.left() + 8, rect.top() + 8,
+                     fm.horizontalAdvance(text) + 16, fm.height() + 8)
+        p.fillRect(chip, color)
+        p.setPen(QColor(255, 255, 255))
+        p.drawText(chip, Qt.AlignCenter, text)
 
     def _to_widget(self, col, row):
         x_off, y_off, sw, sh, iw, ih = self._draw
@@ -129,6 +166,13 @@ class MapPanel(QObject):
         self.view.set_image(png_bytes)
         self._refresh_goal_marker()
 
+    def on_telemetry(self, t):
+        """Drive the map's lost-track badge from the 2 Hz telemetry (always
+        fresh) rather than the map frame, which only ships when the grid
+        changes — a frozen map must still flag POSE LOST promptly."""
+        odom = t.get("odom") or {}
+        self.view.set_loc(odom.get("source"), odom.get("pose_age_ms"))
+
     def _on_view_click(self, col, row):
         """Image-pixel click -> map-frame (x, y). The PNG is flipped so
         image-up = world +y (map_pump): row 0 is the top = max y."""
@@ -160,4 +204,5 @@ class MapPanel(QObject):
             self.toggle.setStyleSheet(_STYLE_OFF)
             self._goal_world = None
             self._meta = None
+            self.view.set_loc(None, None)
             self.view.clear()

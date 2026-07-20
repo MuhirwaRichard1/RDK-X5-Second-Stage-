@@ -181,8 +181,11 @@ class AgentApp:
             if range_cm is not None and math.isnan(range_cm):
                 range_cm = None
             age = self.bridge.teleop_age_ms() if self.bridge else None
+            odom = ({"source": self.bridge.odom_source(),
+                     "pose_age_ms": self.bridge.pose_age_ms()}
+                    if self.bridge else None)
             self.hub.broadcast_fast(protocol.telemetry(
-                rates, range_cm, self.health.sample(), age))
+                rates, range_cm, self.health.sample(), age, odom))
 
     async def attitude_loop(self):
         period = 1.0 / config.ATTITUDE_HZ

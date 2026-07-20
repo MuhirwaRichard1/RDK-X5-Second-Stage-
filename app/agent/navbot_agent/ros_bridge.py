@@ -30,7 +30,7 @@ from rclpy.qos import (QoSProfile, ReliabilityPolicy, DurabilityPolicy,
                        qos_profile_sensor_data)
 
 from geometry_msgs.msg import PoseStamped, Twist
-from nav_msgs.msg import OccupancyGrid
+from nav_msgs.msg import OccupancyGrid, Odometry
 from sensor_msgs.msg import CompressedImage, Image, Imu, Range
 from std_msgs.msg import Bool
 from std_srvs.srv import SetBool
@@ -65,6 +65,9 @@ class RosBridge:
         self.robot_pose = None          # (x, y, yaw_rad, t_mono) from map->base_link TF
         self.pending_save = None        # map basename to save (set on asyncio thread)
         self._goal = None               # (x, y, t_mono) newest nav goal, map frame
+        # last monotonic rx per SLAM odom source (icp/dr/fused) — which one is
+        # live tells the console the active odom backbone (see odom_source()).
+        self._odom_rx = {src: 0.0 for src in config.ODOM_SOURCE_TOPICS}
 
     # ---------------- lifecycle ----------------
 
@@ -110,6 +113,25 @@ class RosBridge:
     def set_goal(self, x, y):
         """Set the newest navigation goal (map frame); published by the node."""
         self._goal = (float(x), float(y), time.monotonic())
+
+    def note_odom(self, source):
+        """Called (executor thread) each time a SLAM odom topic ticks."""
+        self._odom_rx[source] = time.monotonic()
+
+    def odom_source(self):
+        """Which SLAM odom backbone is currently publishing — 'icp' | 'dr' |
+        'fused', or None if SLAM/odom isn't running."""
+        now = time.monotonic()
+        for src in config.ODOM_SOURCE_PRIORITY:
+            if now - self._odom_rx[src] < config.ODOM_FRESH_S:
+                return src
+        return None
+
+    def pose_age_ms(self):
+        """Age of the last map->base_link fix, or None if never localized.
+        Older than POSE_STALE_S means SLAM has lost track / not relocalized."""
+        p = self.robot_pose
+        return int((time.monotonic() - p[3]) * 1000) if p else None
 
     def reassert_models(self):
         """Force every model-enable topic to be republished on the next
@@ -185,6 +207,12 @@ class _AgentNode(Node):
 
         self._map_seq = 0
         self.create_subscription(OccupancyGrid, "/map", self._on_map, latched)
+        # Watch every SLAM odom source so the console can show which backbone
+        # is live (icp/dr/fused). We only need the arrival, not the payload —
+        # the pose itself comes from the map->base_link TF (_pose_tick).
+        for src, topic in config.ODOM_SOURCE_TOPICS.items():
+            self.create_subscription(
+                Odometry, topic, lambda _m, s=src: self.b.note_odom(s), 10)
         self._tf_buffer = tf2_ros.Buffer()
         self._tf_listener = tf2_ros.TransformListener(self._tf_buffer, self)
 
