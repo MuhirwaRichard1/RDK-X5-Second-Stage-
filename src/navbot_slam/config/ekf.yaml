@@ -1,0 +1,49 @@
+# robot_localization EKF for odom_source:=fused. Fuses:
+#   * icp_odometry pose (x, y, yaw)  — good translation, measured against walls
+#   * IMU angular_velocity.z (gyro)  — smooth, high-rate heading between the
+#     10 Hz scans (this MPU6050 reports NO absolute orientation, only rates)
+# and publishes the odom->base_link TF that slam_toolbox consumes.
+#
+# two_d_mode zeroes z/roll/pitch — matches the planar robot and dr_odom's model.
+# NOTE: requires a base_link->imu_link TF (the launch adds an identity static
+# one; the IMU is mounted axis-aligned with base_link, same assumption dr_odom
+# already makes when it reads gyro z directly).
+ekf_filter_node:
+  ros__parameters:
+    frequency: 30.0
+    sensor_timeout: 0.2
+    two_d_mode: true
+    publish_tf: true
+
+    map_frame: map
+    odom_frame: odom
+    base_link_frame: base_link
+    world_frame: odom
+
+    # --- icp_odometry: absolute planar pose ---
+    odom0: /odom_icp
+    #                x      y      z
+    odom0_config: [true,  true,  false,
+    #                roll   pitch  yaw
+                   false, false, true,
+    #                vx     vy     vz
+                   false, false, false,
+    #                vroll  vpitch vyaw
+                   false, false, false,
+    #                ax     ay     az
+                   false, false, false]
+    odom0_differential: false
+    odom0_relative: false
+    odom0_queue_size: 10
+
+    # --- IMU: yaw RATE only (no absolute orientation on this chip) ---
+    imu0: /imu/data
+    imu0_config: [false, false, false,
+                  false, false, false,
+                  false, false, false,
+                  false, false, true,
+                  false, false, false]
+    imu0_differential: false
+    imu0_relative: false
+    imu0_queue_size: 10
+    imu0_remove_gravitational_acceleration: false

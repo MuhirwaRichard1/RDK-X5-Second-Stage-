@@ -4,7 +4,7 @@ lidar_slam.launch.py — Track B lidar SLAM: RPLidar C1 + slam_toolbox.
 
 Pipeline:
   RPLidar C1 (/dev/ttyUSB0 @ 460800) ─► sllidar_node ─► /scan ───────────┐
-  /cmd_vel_safe + /imu/data ─► dr_odom ─► /odom_dr + TF odom->base_link ─┤
+  <odometry source, selectable> ─► TF odom->base_link ───────────────────┤
                                                                          ▼
                        slam_toolbox (async mapping) ─► /map + map->odom + closures
 
@@ -17,10 +17,23 @@ robot and on a replayed rosbag.
                  ros2 launch navbot_slam lidar_slam.launch.py
   standalone   : agent stopped -> add run_lidar:=true (starts sllidar here;
                  double-starting it against an active mode fails on the port)
-                 and run imu_driver by hand for dr_odom
+                 and run imu_driver by hand for dr_odom / fused
   bag replay   : ros2 launch navbot_slam lidar_slam.launch.py use_sim_time:=true
                  + ros2 bag play <bag> --clock --rate 0.5
   record for offline build: /scan /imu/data /cmd_vel_safe /cmd_vel
+
+ODOMETRY SOURCE — odom_source:= (the encoderless-drift fix). A/B on bag
+mapping_fresh_20260713 (2026-07-21) mapped icp visibly crisper than dr (which
+sprays/fragments) — icp is now the DEFAULT. fused came out WORSE (doubled
+walls) — the EKF needs tuning before use; prefer icp until then.
+  icp   (default) LASER scan-matching odometry (rtabmap icp_odometry): x/y/yaw
+                  measured against the walls. The core fix for map smearing.
+  dr              dead-reckoning fallback: /cmd_vel_safe (open-loop translation)
+                  + IMU gyro yaw. Survives feature-poor views icp can't; drifts.
+  fused           icp translation + IMU gyro yaw via a robot_localization EKF
+                  (needs tuning — see A/B note above).
+Exactly one node owns the odom->base_link TF in every mode; slam_toolbox always
+consumes that TF + /scan, so the three are drop-in interchangeable.
 
 Save a finished map:
   ros2 service call /slam_toolbox/save_map slam_toolbox/srv/SaveMap \
@@ -45,6 +58,7 @@ import os
 def generate_launch_description():
     use_sim_time = LaunchConfiguration("use_sim_time")
     run_lidar = LaunchConfiguration("run_lidar")
+    odom_source = LaunchConfiguration("odom_source")
 
     args = [
         DeclareLaunchArgument("use_sim_time", default_value="false",
@@ -53,6 +67,12 @@ def generate_launch_description():
                               description="start the sllidar driver here — "
                                           "only when the agent is stopped (its "
                                           "active modes already run it)"),
+        DeclareLaunchArgument("odom_source", default_value="icp",
+                              description="odom->base_link source: "
+                                          "icp | dr | fused (see docstring). "
+                                          "icp (laser scan-matching) is the "
+                                          "default — A/B 2026-07-21 showed it "
+                                          "maps far crisper than dead-reckoning."),
         DeclareLaunchArgument("serial_port", default_value="/dev/ttyUSB0"),
         # rough base_link -> laser mount — MEASURE & override
         DeclareLaunchArgument("lidar_x", default_value="0.0"),
@@ -61,6 +81,12 @@ def generate_launch_description():
     ]
 
     st = {"use_sim_time": use_sim_time}
+    cfg = get_package_share_directory("navbot_slam")
+
+    # odom_source == <val> as a launch condition
+    def when(val):
+        return IfCondition(PythonExpression(
+            ["'", odom_source, "' == '", val, "'"]))
 
     # --- RPLidar C1 driver -> /scan (live only: a bag supplies /scan when
     # use_sim_time, and a wall-clock driver would corrupt sim-time SLAM) -----
@@ -79,11 +105,6 @@ def generate_launch_description():
         condition=IfCondition(PythonExpression(
             ["'", run_lidar, "' == 'true' and '", use_sim_time, "' != 'true'"])))
 
-    # --- dead-reckoning odometry backbone: /odom_dr + TF odom->base_link ----
-    dr_odom = Node(
-        package="navbot_drive", executable="dr_odom", name="dr_odom",
-        parameters=[st], output="screen")
-
     # --- static extrinsics (rough — see docstring) ---------------------------
     tf_laser = Node(
         package="tf2_ros", executable="static_transform_publisher",
@@ -95,14 +116,51 @@ def generate_launch_description():
                    "--frame-id", "base_link", "--child-frame-id", "laser"],
         parameters=[st])
 
+    # ============ ODOMETRY SOURCES (exactly one publishes odom->base_link) ===
+
+    # (dr) dead-reckoning backbone: /odom_dr + TF odom->base_link -------------
+    dr_odom = Node(
+        package="navbot_drive", executable="dr_odom", name="dr_odom",
+        parameters=[st], output="screen", condition=when("dr"))
+
+    icp_cfg = os.path.join(cfg, "config", "icp_odometry.yaml")
+
+    # (icp) laser scan-matching odometry, publishing the TF directly ----------
+    icp_tf = Node(
+        package="rtabmap_odom", executable="icp_odometry", name="icp_odometry",
+        parameters=[icp_cfg, {"publish_tf": True}, st],
+        remappings=[("scan", "/scan")],
+        output="screen", condition=when("icp"))
+
+    # (fused) icp for translation, EKF fuses in the gyro yaw and owns the TF --
+    icp_topic = Node(
+        package="rtabmap_odom", executable="icp_odometry", name="icp_odometry",
+        parameters=[icp_cfg, {"publish_tf": False}, st],
+        remappings=[("scan", "/scan"), ("odom", "/odom_icp")],
+        output="screen", condition=when("fused"))
+
+    tf_imu = Node(   # base_link -> imu_link (axis-aligned mount) for the EKF
+        package="tf2_ros", executable="static_transform_publisher",
+        name="base_to_imu",
+        arguments=["--x", "0", "--y", "0", "--z", "0",
+                   "--roll", "0", "--pitch", "0", "--yaw", "0",
+                   "--frame-id", "base_link", "--child-frame-id", "imu_link"],
+        parameters=[st], condition=when("fused"))
+
+    ekf = Node(
+        package="robot_localization", executable="ekf_node",
+        name="ekf_filter_node",
+        parameters=[os.path.join(cfg, "config", "ekf.yaml"), st],
+        output="screen", condition=when("fused"))
+
     # --- slam_toolbox: async mapper -> /map + map->odom ----------------------
     slam = Node(
         package="slam_toolbox", executable="async_slam_toolbox_node",
         name="slam_toolbox",
-        parameters=[
-            os.path.join(get_package_share_directory("navbot_slam"),
-                         "config", "slam_toolbox.yaml"),
-            st],
+        parameters=[os.path.join(cfg, "config", "slam_toolbox.yaml"), st],
         output="screen")
 
-    return LaunchDescription(args + [lidar, dr_odom, tf_laser, slam])
+    return LaunchDescription(args + [
+        lidar, tf_laser,
+        dr_odom, icp_tf, icp_topic, tf_imu, ekf,
+        slam])

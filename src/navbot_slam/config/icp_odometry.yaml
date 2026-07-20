@@ -1,0 +1,33 @@
+# Laser scan-matching odometry for the encoderless NavBot — rtabmap_odom's
+# icp_odometry on the RPLidar C1 /scan. Replaces dr_odom's open-loop commanded
+# translation with translation MEASURED against the world (scan-to-map ICP), so
+# battery sag / wheel slip / carpet no longer smear the map. Started by
+# lidar_slam.launch.py when odom_source:=icp or :=fused.
+#
+# rtabmap core params (the CamelCase Group/Name keys) must be STRINGS.
+icp_odometry:
+  ros__parameters:
+    # frames / TF
+    frame_id: base_link            # odometry is computed for base_link; the
+                                   # scan (frame "laser") is transformed in via
+                                   # the launch's static base_link->laser TF
+    odom_frame_id: odom
+    wait_for_transform: 0.2
+    expected_update_rate: 0.0      # disable the watchdog (bag replay rate varies)
+    qos: 1                         # RELIABLE — matches the sllidar driver & bag
+
+    # --- rtabmap odometry strategy ---
+    Reg/Force3DoF: "true"          # planar robot: lock z / roll / pitch
+    Odom/Strategy: "0"             # 0 = Frame-to-Map (local map, more accurate)
+    Odom/GuessMotion: "true"       # constant-velocity prior between scans
+    Odom/ResetCountdown: "1"       # auto-reset if lost, don't wedge the pose
+    Odom/ScanKeyFrameThr: "0.6"    # new keyframe when scan overlap drops below 60%
+
+    # --- ICP registration (2D LaserScan: point-to-point) ---
+    Icp/PointToPlane: "false"
+    Icp/VoxelSize: "0.05"          # 5 cm downsample (matches map resolution)
+    Icp/MaxCorrespondenceDistance: "0.1"
+    Icp/MaxTranslation: "0.3"      # reject implausible per-scan jumps (> 0.3 m)
+    Icp/Iterations: "30"
+    Icp/Epsilon: "0.001"
+    Icp/CorrespondenceRatio: "0.2" # min inlier ratio to accept a match
