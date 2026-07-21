@@ -33,9 +33,11 @@ amcl:
     alpha5: 0.2        # strafe (unused, differential)
 
     # particle cloud. The arena is a small room (~7 m across) so a global
-    # scatter does not need a huge population to cover it.
-    min_particles: 500
-    max_particles: 2000
+    # scatter does not need a huge population to cover it — and a big cloud is
+    # suspected in the rmw "cannot publish data" failures on /cmd_vel that
+    # appear only once amcl joins the graph, so keep this lean.
+    min_particles: 200
+    max_particles: 500
     pf_err: 0.05
     pf_z: 0.99
     # random-particle injection — this is what recovers from a kidnap, and

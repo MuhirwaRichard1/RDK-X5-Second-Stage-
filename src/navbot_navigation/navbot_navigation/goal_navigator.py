@@ -331,12 +331,18 @@ class GoalNavigator(Node):
             return
         centre, _width = run
         self.search_dir = 1.0 if centre >= 0 else -1.0
-        steer = float(_clip(self.k * centre, -self.w_max, self.w_max))
-        if abs(centre) <= self.front_cone and self._sector_free(0.0, self.front_cone):
+        # Gate on "is the way ahead clear", NOT "is the widest opening dead
+        # ahead" — the latter almost never holds, so the robot just span at
+        # w_max and never translated, which is the one thing that localizes it.
+        if self._sector_free(0.0, self.front_cone):
             cmd.linear.x = self.v_max * self.loc_speed
-            cmd.angular.z = steer
-        else:                                      # turn toward the opening first
-            cmd.angular.z = steer or self.search_dir * 0.5
+            # steer toward open space while rolling, but gently: a hard turn
+            # here would cancel the translation we are driving for.
+            cmd.angular.z = float(_clip(self.k * centre,
+                                        -self.w_max * 0.5, self.w_max * 0.5))
+        else:                                      # blocked -> turn to an opening
+            cmd.angular.z = (float(_clip(self.k * centre, -self.w_max, self.w_max))
+                             or self.search_dir * 0.5)
 
     def _tick(self):
         cmd = Twist()
