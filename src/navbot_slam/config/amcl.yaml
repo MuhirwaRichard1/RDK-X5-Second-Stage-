@@ -32,12 +32,13 @@ amcl:
     alpha4: 0.2        # trans noise from rot
     alpha5: 0.2        # strafe (unused, differential)
 
-    # particle cloud. The arena is a small room (~7 m across) so a global
-    # scatter does not need a huge population to cover it — and a big cloud is
-    # suspected in the rmw "cannot publish data" failures on /cmd_vel that
-    # appear only once amcl joins the graph, so keep this lean.
-    min_particles: 200
-    max_particles: 500
+    # particle cloud. These were cut to 200/500 while the rmw "cannot publish
+    # data" failures on /cmd_vel were (wrongly) blamed on cloud size — the real
+    # cause was leaked /dev/shm segments, fixed in run_agent.sh. Back to nav2's
+    # defaults: a GLOBAL scatter has to cover the whole room in x, y AND yaw,
+    # and 500 is thin for that.
+    min_particles: 500
+    max_particles: 2000
     pf_err: 0.05
     pf_z: 0.99
     # random-particle injection — this is what recovers from a kidnap, and

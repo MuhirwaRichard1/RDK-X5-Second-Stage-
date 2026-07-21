@@ -102,6 +102,13 @@ class GoalNavigator(Node):
         self.declare_parameter("localize_cov_xy", 0.15)    # m^2, per axis
         self.declare_parameter("localize_cov_yaw", 0.15)   # rad^2
         self.declare_parameter("localize_timeout_s", 120.0)
+        # the covariance has to STAY tight this long to count as converged. A
+        # single sample below threshold is not enough: right after a scatter
+        # amcl can momentarily report a tight cloud (seen live: x=0.058
+        # y=0.044 yaw=0.065) and then re-spread to ~1.8/2.0/8.7. Latching on
+        # that dip declares success while the robot is still lost — it then
+        # drives confidently to the wrong place.
+        self.declare_parameter("localize_settle_s", 4.0)
         self.declare_parameter("localize_speed", 0.5)      # fraction of v_max
         # Wandering turns slowly on purpose: icp_odometry scan-matches a 10 Hz
         # lidar, and a fast in-place turn distorts the scan enough to lose
@@ -130,6 +137,7 @@ class GoalNavigator(Node):
         self.loc_timeout = g("localize_timeout_s")
         self.loc_speed = g("localize_speed")
         self.wander_wz = g("wander_wz_max")
+        self.loc_settle = g("localize_settle_s")
 
         self.goal = None                # (x, y) in map frame
         self._start_t = self.get_clock().now().nanoseconds * 1e-9
@@ -143,6 +151,7 @@ class GoalNavigator(Node):
         # startup global localization
         self._localized = not g("auto_localize")
         self._amcl_cov = None           # (cov_xx, cov_yy, cov_yaw) newest pose
+        self._conv_since = None         # when the cloud first went tight
         self._loc_start_t = None
         self._reloc_sent_t = None
         self._reloc_futures = []        # keep refs — a GC'd future drops the call
@@ -225,6 +234,7 @@ class GoalNavigator(Node):
                 return False
             self._kidnap_t = self._now()
             self._amcl_cov = None                  # stale until amcl re-reports
+            self._conv_since = None
             self._reloc_sent_t = None
             self.get_logger().warn("kidnap detected — relocalizing")
         if self._converged():
@@ -331,10 +341,20 @@ class GoalNavigator(Node):
             self.get_logger().info(f"state -> {s}")   # surfaces in console log
 
     def _converged(self):
+        """Tight AND settled: the covariance must stay under the thresholds for
+        localize_settle_s. Any sample back over them restarts the clock, so a
+        momentary dip right after a scatter cannot be mistaken for a fix."""
         if self._amcl_cov is None:
+            self._conv_since = None
             return False
         xx, yy, yaw = self._amcl_cov
-        return xx < self.cov_xy and yy < self.cov_xy and yaw < self.cov_yaw
+        if not (xx < self.cov_xy and yy < self.cov_xy and yaw < self.cov_yaw):
+            self._conv_since = None
+            return False
+        now = self._now()
+        if self._conv_since is None:
+            self._conv_since = now
+        return now - self._conv_since >= self.loc_settle
 
     def _localize_tick(self, cmd):
         """Find ourselves in the loaded map before accepting goals: ask AMCL to

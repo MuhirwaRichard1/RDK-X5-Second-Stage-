@@ -13,11 +13,17 @@ Publishes  : /cmd_vel_safe (geometry_msgs/Twist) — consumed by motor_controlle
 Service    : /estop (std_srvs/SetBool)  data=true engages the E-stop
 
 Protections on top of whatever the planner/operator commands:
-  * Proximity ring (360°, always on): any /scan return inside the
-    `stop_diameter_cm` safety circle stops motion TOWARD it — forward is
-    zeroed while the intruder is in the front half-plane, reverse while it
-    is behind; with intruders both sides only rotation passes, so the robot
-    can always turn free and back away.
+  * Proximity ring (always on): a /scan return inside the `stop_diameter_cm`
+    safety circle stops motion TOWARD it — forward is zeroed while the
+    intruder is ahead, reverse while it is behind; with intruders both sides
+    only rotation passes, so the robot can always turn free and back away.
+    "Ahead"/"behind" means inside the SWATH the robot would sweep — within
+    `stop_halfwidth_m` of the centre line — not simply the front/rear
+    half-plane. A half-plane test counts anything beside the robot as ahead,
+    so parking 24 cm from a wall vetoed all forward motion and left the robot
+    able only to turn: it could neither escape nor (with a 360° lidar, where
+    turning yields no new information) localize. Obstacles off to the side
+    still stop it as soon as it turns toward them, via the two checks below.
   * Scan forward stop (always on): nearest finite return within
     ±`forward_halfwidth_deg` of straight ahead closer than `stop_cm` ->
     forward velocity is clamped to 0. Scan stale/missing, or a cone with no
@@ -69,6 +75,10 @@ class SafetyGate(Node):
 
         self.declare_parameter("stop_cm", 30.0)
         self.declare_parameter("stop_diameter_cm", 60.0)
+        # half the corridor the proximity ring guards, measured out from the
+        # centre line — a body half-width plus a margin. Returns further to the
+        # side than this do not block driving straight (see _on_scan).
+        self.declare_parameter("stop_halfwidth_m", 0.22)
         self.declare_parameter("forward_halfwidth_deg", 15.0)
         self.declare_parameter("min_range_m", 0.12)   # under -> self-hit, drop
         self.declare_parameter("scan_stale_s", 0.6)
@@ -89,6 +99,7 @@ class SafetyGate(Node):
         g = lambda n: self.get_parameter(n).value  # noqa: E731
         self.stop_cm = g("stop_cm")
         self.stop_radius = float(g("stop_diameter_cm")) / 200.0  # cm dia -> m radius
+        self.stop_halfwidth = float(g("stop_halfwidth_m"))
         self.fwd_hw = math.radians(float(g("forward_halfwidth_deg")))
         self.min_range = float(g("min_range_m"))
         self.scan_stale_s = float(g("scan_stale_s"))
@@ -151,11 +162,22 @@ class SafetyGate(Node):
             if not math.isfinite(r) or r < self.min_range:
                 continue
             ab = abs(b)
-            if ab <= math.pi / 2.0:
-                if prox_f is None or r < prox_f:
-                    prox_f = r
-            elif prox_r is None or r < prox_r:
-                prox_r = r
+            # Proximity ring, resolved as a SWATH rather than a half-plane: a
+            # return only blocks straight-line motion if it sits in the
+            # corridor the robot would actually sweep, i.e. within half a body
+            # width of the centre line. Testing |b| <= 90 deg instead counted
+            # anything beside the robot as "ahead", so parking 24 cm from a
+            # wall vetoed all forward motion and left it able only to turn —
+            # which cannot escape the spot, and (360 deg lidar) cannot localize
+            # either. Obstacles off to the side are still handled by the
+            # forward cone and sector stop when the robot turns toward them.
+            lat = abs(r * math.sin(b))
+            if lat <= self.stop_halfwidth:
+                if r * math.cos(b) >= 0.0:
+                    if prox_f is None or r < prox_f:
+                        prox_f = r
+                elif prox_r is None or r < prox_r:
+                    prox_r = r
             if ab <= self.fwd_hw and (fwd is None or r < fwd):
                 fwd = r
             if ab <= self.assist_cone and (near_f is None or r < near_f):
