@@ -102,13 +102,7 @@ class Harness(Node):
 
 def main():
     rclpy.init()
-    # auto_localize off: these scenarios exercise the goal-following FSM, and
-    # there is no amcl on the bench — the node would otherwise sit in
-    # LOCALIZING forever waiting for a particle cloud that never converges.
-    # The kidnap scenario below still works, it wanders without needing amcl.
-    nav = GoalNavigator(parameter_overrides=[
-        rclpy.parameter.Parameter("auto_localize",
-                                  rclpy.parameter.Parameter.Type.BOOL, False)])
+    nav = GoalNavigator()
     h = Harness()
     ex = MultiThreadedExecutor()
     ex.add_node(nav)
@@ -152,10 +146,7 @@ def main():
                        all_free(), (0.05, 0.0),
                        lambda vx, az: abs(vx) < 1e-6 and abs(az) < 1e-6))
 
-    # KIDNAP: navigating a clear goal, then a lift -> RELOCALIZE. The robot
-    # must DRIVE, not spin: the C1 sees 360 deg, so turning on the spot gives
-    # AMCL no new information and the scatter never collapses. Open space all
-    # round, so it should roll forward roughly straight, capped below v_max.
+    # KIDNAP: navigating a clear goal, then a lift -> RELOCALIZE (spin, no drive)
     h.pose = (0.0, 0.0, 0.0)
     h.status = all_free()
     h.set_goal(2.0, 0.0)
@@ -164,10 +155,8 @@ def main():
     h.inject_lift()
     time.sleep(0.5)                      # inside the relocalize window
     vx, az = h.last_cmd if h.last_cmd else (None, None)
-    ok = (h.last_cmd is not None
-          and 0.02 < vx < 0.22           # translating, but slower than v_max
-          and abs(az) < 0.4)             # gentle: fast turns lose icp odometry
-    print(f"[{'PASS' if ok else 'FAIL'}] KIDNAP (lift -> relocalize by driving): "
+    ok = h.last_cmd is not None and vx < 0.02 and abs(az - 0.5) < 0.2
+    print(f"[{'PASS' if ok else 'FAIL'}] KIDNAP (lift -> relocalize): "
           f"vx={vx}, az={az}")
     results.append(ok)
 

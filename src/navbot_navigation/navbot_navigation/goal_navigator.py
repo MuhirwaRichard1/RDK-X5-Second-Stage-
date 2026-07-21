@@ -5,37 +5,19 @@ goal_navigator — drive to a map-frame goal, avoiding obstacles.
 The autonomous counterpart to local_planner: instead of just seeking open
 space, it seeks a GOAL while reusing the same widest-free-run avoidance so it
 never drives forward into a BLOCKED/UNKNOWN sector. Runs in the "navigate"
-mode alongside nav2_amcl localization (which supplies map->odom, and so
-map->base_link on top of icp_odometry).
+mode alongside slam_toolbox localization (which supplies map->base_link).
 
 Subscribes:
   /goal       geometry_msgs/PoseStamped  (map frame — from the console click)
   /obstacles  navbot_msgs/Sectors        (robot-frame free-space, scan_sectors)
-  /amcl_pose  PoseWithCovarianceStamped  (localization quality — convergence)
-  TF map->base_link                       (robot pose; amcl + icp odom)
+  TF map->base_link                       (robot pose; localization + icp odom)
 Publishes:
   /cmd_vel          geometry_msgs/Twist   (-> safety_gate -> /cmd_vel_safe)
-  /behaviour/state  std_msgs/String
-                    (LOCALIZING/IDLE/NAVIGATE/AVOID/ARRIVED/LOST/RELOCALIZE)
-
-On entering NAVIGATE the robot does not know where it is inside the loaded map,
-so it asks AMCL to scatter particles over the whole map
-(/reinitialize_global_localization) and WANDERS until they collapse onto one
-hypothesis; only then does it accept goals. Clicking before that just queues
-the goal for when it knows where it is.
-
-A kidnap — lift and carry — is the same problem mid-run, and takes the same
-route: scatter particles over the whole map
-(/reinitialize_global_localization) and then WANDERS toward open space until
-the filter re-converges, before resuming the goal it was already driving to.
-It has to drive, not spin: the C1 is a 360 deg lidar, so turning on the spot
-returns the same ranges index-shifted and tells the filter nothing — only
-visiting different positions disambiguates.
+  /behaviour/state  std_msgs/String       (IDLE/NAVIGATE/AVOID/ARRIVED/LOST)
 
 FSM per tick:
-  not yet localized               -> LOCALIZING, wander (auto_localize, on)
   no goal                         -> IDLE, stop
-  lift / scan jump, goal active   -> RELOCALIZE, scatter + wander until found
+  recent lift / scan jump         -> RELOCALIZE, rotate slowly to re-localize
   no/old map->base_link TF        -> LOST, stop (also the kidnapped state)
   within goal_tolerance           -> ARRIVED, stop, clear goal
   goal not ahead (|bearing|>align)-> rotate in place toward it
@@ -53,10 +35,9 @@ from rclpy.node import Node
 from rclpy.qos import QoSProfile, ReliabilityPolicy, DurabilityPolicy
 import tf2_ros
 
-from geometry_msgs.msg import PoseStamped, PoseWithCovarianceStamped, Twist
+from geometry_msgs.msg import PoseStamped, Twist
 from sensor_msgs.msg import Imu, LaserScan
 from std_msgs.msg import String
-from std_srvs.srv import Empty
 
 from navbot_msgs.msg import Sectors
 
@@ -68,10 +49,8 @@ def _wrap(a):
 
 
 class GoalNavigator(Node):
-    def __init__(self, **kwargs):
-        # kwargs forwarded to Node so a bench harness can override parameters
-        # (e.g. auto_localize off when there is no amcl to converge against)
-        super().__init__("goal_navigator", **kwargs)
+    def __init__(self):
+        super().__init__("goal_navigator")
 
         self.declare_parameter("rate_hz", 15.0)
         self.declare_parameter("v_max", 0.22)           # m/s forward
@@ -93,28 +72,6 @@ class GoalNavigator(Node):
         self.declare_parameter("scan_jump_thresh", 0.6)    # m mean-range jump
         self.declare_parameter("relocalize_time_s", 5.0)   # spin-recover window
         self.declare_parameter("relocalize_wz", 0.5)       # rad/s recover spin
-        # Startup global localization: on entering NAVIGATE the robot does not
-        # know where it is, so scatter particles over the whole map and wander
-        # until they collapse (see _localize_tick), THEN accept goals. Seeding
-        # at the map origin instead only holds if the robot is parked exactly
-        # where mapping began — otherwise goals land in the wrong place.
-        self.declare_parameter("auto_localize", True)
-        self.declare_parameter("localize_cov_xy", 0.15)    # m^2, per axis
-        self.declare_parameter("localize_cov_yaw", 0.15)   # rad^2
-        self.declare_parameter("localize_timeout_s", 120.0)
-        # the covariance has to STAY tight this long to count as converged. A
-        # single sample below threshold is not enough: right after a scatter
-        # amcl can momentarily report a tight cloud (seen live: x=0.058
-        # y=0.044 yaw=0.065) and then re-spread to ~1.8/2.0/8.7. Latching on
-        # that dip declares success while the robot is still lost — it then
-        # drives confidently to the wrong place.
-        self.declare_parameter("localize_settle_s", 4.0)
-        self.declare_parameter("localize_speed", 0.5)      # fraction of v_max
-        # Wandering turns slowly on purpose: icp_odometry scan-matches a 10 Hz
-        # lidar, and a fast in-place turn distorts the scan enough to lose
-        # tracking — odom then freezes, amcl sees no motion, and nothing ever
-        # converges. Keep turns gentle enough that icp stays locked.
-        self.declare_parameter("wander_wz_max", 0.4)       # rad/s
 
         g = lambda n: self.get_parameter(n).value  # noqa: E731
         self.v_max, self.w_max = g("v_max"), g("w_max")
@@ -132,12 +89,6 @@ class GoalNavigator(Node):
         self.scan_jump = g("scan_jump_thresh")
         self.reloc_time = g("relocalize_time_s")
         self.reloc_wz = g("relocalize_wz")
-        self.cov_xy = g("localize_cov_xy")
-        self.cov_yaw = g("localize_cov_yaw")
-        self.loc_timeout = g("localize_timeout_s")
-        self.loc_speed = g("localize_speed")
-        self.wander_wz = g("wander_wz_max")
-        self.loc_settle = g("localize_settle_s")
 
         self.goal = None                # (x, y) in map frame
         self._start_t = self.get_clock().now().nanoseconds * 1e-9
@@ -146,15 +97,7 @@ class GoalNavigator(Node):
         self.search_dir = 1.0
         self.state = ""
         self._disturb_t = None          # last lift/scan-jump disturbance time
-        self._kidnap_t = None           # start of the current kidnap recovery
         self._last_scan_mean = None
-        # startup global localization
-        self._localized = not g("auto_localize")
-        self._amcl_cov = None           # (cov_xx, cov_yy, cov_yaw) newest pose
-        self._conv_since = None         # when the cloud first went tight
-        self._loc_start_t = None
-        self._reloc_sent_t = None
-        self._reloc_futures = []        # keep refs — a GC'd future drops the call
 
         self._tf_buffer = tf2_ros.Buffer()
         self._tf_listener = tf2_ros.TransformListener(self._tf_buffer, self)
@@ -165,10 +108,6 @@ class GoalNavigator(Node):
         self.create_subscription(Sectors, "/obstacles", self._on_sectors, 10)
         self.create_subscription(Imu, "/imu/data", self._on_imu, 10)
         self.create_subscription(LaserScan, "/scan", self._on_scan, 10)
-        self.create_subscription(PoseWithCovarianceStamped, "/amcl_pose",
-                                 self._on_amcl_pose, 10)
-        self._global_reloc = self.create_client(
-            Empty, "/reinitialize_global_localization")
         self.pub = self.create_publisher(Twist, "/cmd_vel", 10)
         self.state_pub = self.create_publisher(String, "/behaviour/state", latched)
 
@@ -194,12 +133,6 @@ class GoalNavigator(Node):
         self.sectors = msg
         self.sectors_t = self._now()
 
-    def _on_amcl_pose(self, msg):
-        """AMCL's pose covariance is how we know the particle cloud has
-        collapsed onto one hypothesis (row-major 6x6: xx=0, yy=7, yaw=35)."""
-        c = msg.pose.covariance
-        self._amcl_cov = (c[0], c[7], c[35])
-
     def _on_imu(self, msg):
         """A lift or set-down shows up as an accel magnitude far from 1 g."""
         a = msg.linear_acceleration
@@ -220,49 +153,8 @@ class GoalNavigator(Node):
         self._last_scan_mean = mean
 
     def _relocalizing(self):
-        """True while recovering from a kidnap. Entered by a lift/scan-jump
-        once we have a goal to get back to, left when AMCL has re-converged
-        (or we give up) — not on a fixed timer, because how long a scatter
-        takes to collapse depends on where the robot was carried to."""
-        if self._disturb_t is None:
-            return False
-        if self._kidnap_t is None:                 # new disturbance -> recover
-            # ignore a stale bump (e.g. one felt while idle, before a goal was
-            # ever clicked) — only a fresh one means we were just moved.
-            if self.goal is None or self._now() - self._disturb_t > self.reloc_time:
-                self._disturb_t = None
-                return False
-            self._kidnap_t = self._now()
-            self._amcl_cov = None                  # stale until amcl re-reports
-            self._conv_since = None
-            self._reloc_sent_t = None
-            self.get_logger().warn("kidnap detected — relocalizing")
-        if self._converged():
-            xx, yy, yaw = self._amcl_cov
-            self.get_logger().info(
-                f"relocalized (cov x={xx:.3f} y={yy:.3f} yaw={yaw:.3f}) "
-                "— resuming goal")
-            self._disturb_t = self._kidnap_t = None
-            return False
-        if self._now() - self._kidnap_t > self.loc_timeout:
-            self.get_logger().warn(
-                f"relocalization gave up after {self.loc_timeout:.0f}s — "
-                "resuming on a POSSIBLY WRONG pose")
-            self._disturb_t = self._kidnap_t = None
-            return False
-        return True
-
-    def _relocalize_tick(self, cmd):
-        """Scatter particles across the map, then drive (not spin — see
-        _wander) until the filter picks the robot's new spot back out."""
-        now = self._now()
-        if self._amcl_cov is None and self._global_reloc.service_is_ready() \
-                and (self._reloc_sent_t is None or now - self._reloc_sent_t > 5.0):
-            self._reloc_futures.append(
-                self._global_reloc.call_async(Empty.Request()))
-            self._reloc_sent_t = now
-            self.get_logger().info("global localization requested (kidnap)")
-        self._wander(cmd)
+        return (self._disturb_t is not None
+                and self._now() - self._disturb_t < self.reloc_time)
 
     def _now(self):
         return self.get_clock().now().nanoseconds * 1e-9
@@ -322,146 +214,32 @@ class GoalNavigator(Node):
                 run_start = None
         return best if best and best[1] >= self.min_run else None
 
-    def _drive(self, cmd):
-        """Publish a velocity command. A transient RMW publish failure (seen
-        under the full navigate stack) used to raise straight out of the timer
-        and kill the node, leaving the robot with no controller at all — log it
-        and keep ticking instead. safety_gate stops the wheels either way if
-        commands really do stop arriving."""
-        try:
-            self.pub.publish(cmd)
-        except RuntimeError as e:                # rclpy RCLError subclasses this
-            self.get_logger().warn(f"/cmd_vel publish failed: {e}",
-                                   throttle_duration_sec=2.0)
-
     def _set_state(self, s):
         if s != self.state:
             self.state = s
             self.state_pub.publish(String(data=s))
             self.get_logger().info(f"state -> {s}")   # surfaces in console log
 
-    def _converged(self):
-        """Tight AND settled: the covariance must stay under the thresholds for
-        localize_settle_s. Any sample back over them restarts the clock, so a
-        momentary dip right after a scatter cannot be mistaken for a fix."""
-        if self._amcl_cov is None:
-            self._conv_since = None
-            return False
-        xx, yy, yaw = self._amcl_cov
-        if not (xx < self.cov_xy and yy < self.cov_xy and yaw < self.cov_yaw):
-            self._conv_since = None
-            return False
-        now = self._now()
-        if self._conv_since is None:
-            self._conv_since = now
-        return now - self._conv_since >= self.loc_settle
-
-    def _localize_tick(self, cmd):
-        """Find ourselves in the loaded map before accepting goals: ask AMCL to
-        scatter particles map-wide, then drive around (see _wander) until the
-        covariance collapses."""
-        now = self._now()
-        if self._loc_start_t is None:
-            self._loc_start_t = now
-
-        # AMCL publishes nothing at all until it has been given a starting
-        # belief ("cannot publish a pose or update the transform"), so no
-        # /amcl_pose yet means the scatter request has not landed. Keep asking
-        # until it does — a single fire-and-forget call is easy to lose to
-        # service discovery still settling right after activation.
-        if self._amcl_cov is None:
-            if not self._global_reloc.service_is_ready():
-                self._set_state("LOCALIZING")    # amcl still coming up
-                self._drive(cmd)
-                return
-            if self._reloc_sent_t is None or now - self._reloc_sent_t > 5.0:
-                self._reloc_futures.append(
-                    self._global_reloc.call_async(Empty.Request()))
-                self._reloc_sent_t = now
-                self.get_logger().info(
-                    "global localization requested — spinning to converge")
-
-        if self._converged():
-            self._localized = True
-            xx, yy, yaw = self._amcl_cov
-            self.get_logger().info(
-                f"localized in map (cov x={xx:.3f} y={yy:.3f} yaw={yaw:.3f}) "
-                "— ready for goals")
-            self._drive(cmd)            # stop the spin
-            return
-
-        if now - self._loc_start_t > self.loc_timeout:
-            self._localized = True
-            self.get_logger().warn(
-                f"localization did not converge in {self.loc_timeout:.0f}s — "
-                "accepting goals anyway, POSE MAY BE WRONG (drive it around, "
-                "or re-enter NAVIGATE to retry)")
-            self._drive(cmd)
-            return
-
-        self._set_state("LOCALIZING")
-        self._wander(cmd)
-        self._drive(cmd)
-
-    def _wander(self, cmd):
-        """Drive toward open space so AMCL's cloud can collapse. Rotating in
-        place cannot do it: the C1 is a 360 deg lidar, so it already sees the
-        whole room from where it stands and a turn returns the same ranges
-        index-shifted — no new information. Only visiting different POSITIONS
-        disambiguates. Same widest-free-run avoidance the AVOID state uses, so
-        this never drives into a blocked sector (safety_gate underneath too).
-
-        Every turn here is capped at wander_wz_max: a fast in-place turn
-        distorts the 10 Hz scan enough for icp_odometry to lose tracking, and a
-        frozen odom means amcl sees no motion and never converges."""
-        wz = self.wander_wz
-        if self.sectors is None or self._now() - self.sectors_t > self.obst_stale_s:
-            cmd.angular.z = min(self.reloc_wz, wz)  # no fresh scan -> just turn
-            return
-        run = self._best_run()
-        if run is None:                            # nowhere free -> rotate-search
-            cmd.angular.z = self.search_dir * wz
-            return
-        centre, _width = run
-        self.search_dir = 1.0 if centre >= 0 else -1.0
-        # Gate on "is the way ahead clear", NOT "is the widest opening dead
-        # ahead" — the latter almost never holds, so the robot just span at
-        # w_max and never translated, which is the one thing that localizes it.
-        if self._sector_free(0.0, self.front_cone):
-            cmd.linear.x = self.v_max * self.loc_speed
-            # steer toward open space while rolling, but gently: a hard turn
-            # here would cancel the translation we are driving for.
-            cmd.angular.z = float(_clip(self.k * centre, -wz * 0.5, wz * 0.5))
-        else:                                      # blocked -> turn to an opening
-            cmd.angular.z = (float(_clip(self.k * centre, -wz, wz))
-                             or self.search_dir * wz * 0.5)
-
     def _tick(self):
         cmd = Twist()
 
-        # we do not know where we are in the map yet -> localize first
-        if not self._localized:
-            self._localize_tick(cmd)
-            return
-
         if self.goal is None:
             self._set_state("IDLE")
-            self._drive(cmd)
+            self.pub.publish(cmd)
             return
 
-        # kidnap recovery: a lift/scan-jump means our pose is meaningless, so
-        # scatter AMCL over the map and drive until it finds us again. The goal
-        # stays latched, so we resume the same trip once relocalized.
+        # kidnap recovery: a recent lift/scan-jump -> stop navigating and rotate
+        # slowly so slam_toolbox localization re-matches the map, then resume.
         if self._relocalizing():
             self._set_state("RELOCALIZE")
-            self._relocalize_tick(cmd)
-            self._drive(cmd)
+            cmd.angular.z = self.reloc_wz
+            self.pub.publish(cmd)
             return
 
         pose = self._pose()
         if pose is None:
             self._set_state("LOST")          # no localization / kidnapped
-            self._drive(cmd)
+            self.pub.publish(cmd)
             return
 
         rx, ry, ryaw = pose
@@ -470,7 +248,7 @@ class GoalNavigator(Node):
         if dist <= self.tol:
             self._set_state("ARRIVED")
             self.goal = None                 # latch; a new /goal re-arms us
-            self._drive(cmd)
+            self.pub.publish(cmd)
             return
 
         bearing = _wrap(math.atan2(dy, dx) - ryaw)   # robot-frame angle to goal
@@ -481,7 +259,7 @@ class GoalNavigator(Node):
             self._set_state("NAVIGATE")
             cmd.angular.z = float(_clip(self.k * bearing, -self.w_max, self.w_max))
             self.search_dir = 1.0 if bearing >= 0 else -1.0
-            self._drive(cmd)
+            self.pub.publish(cmd)
             return
 
         # aligned: drive toward the goal if the cone that way is FREE
@@ -489,7 +267,7 @@ class GoalNavigator(Node):
             self._set_state("NAVIGATE")
             cmd.linear.x = self.v_max * _clip(dist / self.slow_dist, 0.15, 1.0)
             cmd.angular.z = float(_clip(self.k * bearing, -self.w_max, self.w_max))
-            self._drive(cmd)
+            self.pub.publish(cmd)
             return
 
         # blocked toward the goal -> detour via the widest FREE run
@@ -497,7 +275,7 @@ class GoalNavigator(Node):
         if run is None:                      # nowhere free -> rotate-search
             self._set_state("AVOID")
             cmd.angular.z = self.search_dir * self.w_max * 0.6
-            self._drive(cmd)
+            self.pub.publish(cmd)
             return
         self._set_state("AVOID")
         centre, width = run
@@ -509,7 +287,7 @@ class GoalNavigator(Node):
         else:
             cmd.angular.z = (float(_clip(self.k * centre, -self.w_max, self.w_max))
                              or self.search_dir * 0.5)
-        self._drive(cmd)
+        self.pub.publish(cmd)
 
 
 def _clip(v, lo, hi):

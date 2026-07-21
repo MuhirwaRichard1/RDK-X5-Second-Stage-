@@ -1,28 +1,25 @@
 # Copyright (c) 2026 Ricardo Muhirwa — MIT License
 """
 autonav.launch.py — console-driven autonomous goal navigation. The reactive
-stack with the goal_navigator in place of local_planner, PLUS lidar SLAM in
-localization mode (loads a saved map, relocalizes, and recovers from a kidnap).
-This is the agent's "navigate" mode.
+stack with the goal_navigator in place of local_planner, PLUS live lidar SLAM
+(slam_toolbox mapping mode). This is the agent's "navigate" mode.
 
     cameras + RPLidar C1 + imu_driver + scan_sectors + safety_gate
       + motor_controller (motors:=true) + detection/depth BPU (idle)
-    + lidar_slam.launch.py (slam_mode:=none, odom_source:=icp):
+    + lidar_slam.launch.py (slam_mode:=mapping, odom_source:=icp):
         icp_odometry (odom->base_link) + base_link->laser TF
-    + amcl_localization.launch.py (map_file:=<map>): map_server serves the
-        saved map, nav2_amcl publishes map->odom (globally localizable)
+        + slam_toolbox building a live map -> /map + map->odom
     + goal_navigator: /goal + /obstacles + map->base_link -> /cmd_vel
 
-Operator flow: map a room in MAPPING mode, SAVE MAP, then switch to NAVIGATE
-and pick the map. The robot does not know where it is in that map yet, so it
-scatters AMCL's particles over the whole thing and wanders until they collapse
-(state LOCALIZING) — then click a point on the console map and it drives there,
-avoiding obstacles. A click made while it is still localizing is queued. Lift
-and carry it -> it scatters again, re-finds itself, and resumes the same goal.
+Operator flow: switch to NAVIGATE. slam_toolbox starts a fresh map from the
+robot's current position (so map->odom is valid at once — no cold-start pose
+problem), and the map grows as the robot drives into new space. Click a point
+on the console map and it drives there, avoiding obstacles. SAVE MAP persists
+the grown map. A lift/bump triggers a brief re-match spin (small bumps only —
+there is no global relocalization; a real lift-and-carry can corrupt the map).
 
     ros2 launch navbot_bringup autonav.launch.py                    # dry
     ros2 launch navbot_bringup autonav.launch.py motors:=true       # drives!
-    ros2 launch navbot_bringup autonav.launch.py map_file:=maps/foo # other map
 
 E-stop at any time:  ros2 service call /estop std_srvs/srv/SetBool "{data: true}"
 """
@@ -42,36 +39,29 @@ def generate_launch_description():
     motors = DeclareLaunchArgument(
         "motors", default_value="false",
         description="true = motor_controller drives the wheels")
+    # Accepted (the agent appends map_file:= for navigate) but UNUSED: NAVIGATE
+    # builds a fresh live map rather than loading a saved one. Kept declared so
+    # the launch does not reject the argument.
     map_file = DeclareLaunchArgument(
         "map_file",
         default_value="/home/sunrise/rdk-x5-navbot/maps/current",
-        description="saved pose-graph basename to localize against "
-                    "(what MAPPING's SAVE MAP writes)")
+        description="unused — NAVIGATE builds a fresh map (kept for arg compat)")
 
     cameras = IncludeLaunchDescription(
         PythonLaunchDescriptionSource(
             os.path.join(get_package_share_directory("navbot_cameras"),
                          "launch/three_cam.launch.py")))
 
-    # Odometry only (icp_odometry -> odom->base_link, + base_link->laser TF).
-    # slam_mode:=none — AMCL below owns map->odom, not slam_toolbox.
-    # run_lidar:=false — the sllidar_node below owns the serial port.
+    # Live lidar SLAM: icp_odometry (odom->base_link) + slam_toolbox mapping
+    # (builds /map and publishes map->odom). run_lidar:=false — the sllidar_node
+    # below owns the serial port.
     slam = IncludeLaunchDescription(
         PythonLaunchDescriptionSource(
             os.path.join(get_package_share_directory("navbot_slam"),
                          "launch/lidar_slam.launch.py")),
-        launch_arguments={"slam_mode": "none",
+        launch_arguments={"slam_mode": "mapping",
                           "odom_source": "icp",
                           "run_lidar": "false"}.items())
-
-    # Localization against the saved map: map_server + nav2_amcl. Unlike
-    # slam_toolbox localization this can GLOBALLY localize — goal_navigator
-    # kicks /reinitialize_global_localization and spins until it converges.
-    localization = IncludeLaunchDescription(
-        PythonLaunchDescriptionSource(
-            os.path.join(get_package_share_directory("navbot_slam"),
-                         "launch/amcl_localization.launch.py")),
-        launch_arguments={"map_file": LaunchConfiguration("map_file")}.items())
 
     return LaunchDescription([
         motors, map_file,
@@ -104,5 +94,5 @@ def generate_launch_description():
              name="detection_bpu", output="screen"),
         Node(package="navbot_perception", executable="depth_bpu",
              name="depth_bpu", output="screen"),
-        slam, localization,
+        slam,
     ])

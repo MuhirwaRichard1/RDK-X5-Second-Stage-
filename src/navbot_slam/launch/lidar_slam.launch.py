@@ -37,11 +37,11 @@ SLAM MODE — slam_mode:= (what slam_toolbox does with the scans):
   mapping (default) build a fresh map (async node) -> /map + map->odom.
   localization      load map_file:=<basename> and relocalize against it
                     (localization node). NOTE: this only scan-matches LOCALLY
-                    from the map origin — it cannot find the robot in the map.
-                    NAVIGATE uses nav2_amcl instead (amcl_localization.launch.py).
+                    from the map origin — it cannot find the robot in the map,
+                    so it needs the robot parked where mapping began.
   none              odometry + TF only; something else owns map->odom.
-  The bringup modes drive these: mapping.launch.py -> mapping,
-  autonav.launch.py -> none (+ amcl_localization.launch.py).
+  The bringup modes drive these: both mapping.launch.py and autonav.launch.py
+  use `mapping` — NAVIGATE builds a live map and drives to goals within it.
 Exactly one node owns the odom->base_link TF in every mode; slam_toolbox always
 consumes that TF + /scan, so the three are drop-in interchangeable.
 
@@ -88,8 +88,8 @@ def generate_launch_description():
         DeclareLaunchArgument("slam_mode", default_value="mapping",
                               description="mapping = build a new map (async node); "
                                           "localization = load map_file and "
-                                          "scan-match against it (local only — "
-                                          "NAVIGATE uses amcl instead); "
+                                          "scan-match against it (local only, "
+                                          "needs the robot parked at map origin); "
                                           "none = odometry + TF only."),
         DeclareLaunchArgument(
             "map_file",

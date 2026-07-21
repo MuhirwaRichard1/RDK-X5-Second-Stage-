@@ -41,7 +41,7 @@ WS_SETUP = os.path.join(WS_ROOT, "install/setup.bash")
 FORCE_MOTORS_OFF = False
 
 # mode name -> (launch file, motors). stopped = no launch process.
-# mapping = teleop + SLAM build; navigate = localization + goal navigation.
+# mapping = teleop + SLAM build; navigate = live SLAM + goal navigation.
 MODES = {
     "stopped":  None,
     "observe":  ("navigation.launch.py", False),
