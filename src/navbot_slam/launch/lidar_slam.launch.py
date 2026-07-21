@@ -36,9 +36,12 @@ walls) — the EKF needs tuning before use; prefer icp until then.
 SLAM MODE — slam_mode:= (what slam_toolbox does with the scans):
   mapping (default) build a fresh map (async node) -> /map + map->odom.
   localization      load map_file:=<basename> and relocalize against it
-                    (localization node); this is also the kidnap relocalizer.
+                    (localization node). NOTE: this only scan-matches LOCALLY
+                    from the map origin — it cannot find the robot in the map.
+                    NAVIGATE uses nav2_amcl instead (amcl_localization.launch.py).
+  none              odometry + TF only; something else owns map->odom.
   The bringup modes drive these: mapping.launch.py -> mapping,
-  autonav.launch.py -> localization.
+  autonav.launch.py -> none (+ amcl_localization.launch.py).
 Exactly one node owns the odom->base_link TF in every mode; slam_toolbox always
 consumes that TF + /scan, so the three are drop-in interchangeable.
 
@@ -85,8 +88,9 @@ def generate_launch_description():
         DeclareLaunchArgument("slam_mode", default_value="mapping",
                               description="mapping = build a new map (async node); "
                                           "localization = load map_file and "
-                                          "relocalize against it (also kidnap "
-                                          "recovery)."),
+                                          "scan-match against it (local only — "
+                                          "NAVIGATE uses amcl instead); "
+                                          "none = odometry + TF only."),
         DeclareLaunchArgument(
             "map_file",
             default_value="/home/sunrise/rdk-x5-navbot/maps/arena_20260713",

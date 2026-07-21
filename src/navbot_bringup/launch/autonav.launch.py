@@ -7,13 +7,15 @@ This is the agent's "navigate" mode.
 
     cameras + RPLidar C1 + imu_driver + scan_sectors + safety_gate
       + motor_controller (motors:=true) + detection/depth BPU (idle)
-    + lidar_slam.launch.py (slam_mode:=localization map_file:=<map>,
-        odom_source:=icp): icp_odometry (odom->base_link) + base_link->laser TF
-        + slam_toolbox localization (loads <map>, publishes map->odom)
+    + lidar_slam.launch.py (slam_mode:=none, odom_source:=icp):
+        icp_odometry (odom->base_link) + base_link->laser TF
+    + amcl_localization.launch.py (map_file:=<map>): map_server serves the
+        saved map, nav2_amcl publishes map->odom (globally localizable)
     + goal_navigator: /goal + /obstacles + map->base_link -> /cmd_vel
 
-Operator flow: map a room in MAPPING mode, SAVE MAP (writes maps/current),
-switch to NAVIGATE, click a point on the console map -> the robot drives there,
+Operator flow: map a room in MAPPING mode, SAVE MAP, switch to NAVIGATE and
+pick the map -> the robot spins in place until AMCL converges on where it is
+inside that map, then clicking a point on the console map drives it there,
 avoiding obstacles; lift-and-move -> it relocalizes and resumes.
 
     ros2 launch navbot_bringup autonav.launch.py                    # dry
@@ -49,16 +51,25 @@ def generate_launch_description():
             os.path.join(get_package_share_directory("navbot_cameras"),
                          "launch/three_cam.launch.py")))
 
-    # Lidar SLAM in LOCALIZATION mode against the saved map. run_lidar:=false —
-    # the sllidar_node below owns the serial port.
+    # Odometry only (icp_odometry -> odom->base_link, + base_link->laser TF).
+    # slam_mode:=none — AMCL below owns map->odom, not slam_toolbox.
+    # run_lidar:=false — the sllidar_node below owns the serial port.
     slam = IncludeLaunchDescription(
         PythonLaunchDescriptionSource(
             os.path.join(get_package_share_directory("navbot_slam"),
                          "launch/lidar_slam.launch.py")),
-        launch_arguments={"slam_mode": "localization",
-                          "map_file": LaunchConfiguration("map_file"),
+        launch_arguments={"slam_mode": "none",
                           "odom_source": "icp",
                           "run_lidar": "false"}.items())
+
+    # Localization against the saved map: map_server + nav2_amcl. Unlike
+    # slam_toolbox localization this can GLOBALLY localize — goal_navigator
+    # kicks /reinitialize_global_localization and spins until it converges.
+    localization = IncludeLaunchDescription(
+        PythonLaunchDescriptionSource(
+            os.path.join(get_package_share_directory("navbot_slam"),
+                         "launch/amcl_localization.launch.py")),
+        launch_arguments={"map_file": LaunchConfiguration("map_file")}.items())
 
     return LaunchDescription([
         motors, map_file,
@@ -91,5 +102,5 @@ def generate_launch_description():
              name="detection_bpu", output="screen"),
         Node(package="navbot_perception", executable="depth_bpu",
              name="depth_bpu", output="screen"),
-        slam,
+        slam, localization,
     ])

@@ -10,6 +10,9 @@
   <exec_depend>rclpy</exec_depend>
   <exec_depend>sensor_msgs</exec_depend>
   <exec_depend>slam_toolbox</exec_depend>
+  <exec_depend>nav2_amcl</exec_depend>
+  <exec_depend>nav2_map_server</exec_depend>
+  <exec_depend>nav2_lifecycle_manager</exec_depend>
   <exec_depend>sllidar_ros2</exec_depend>
   <exec_depend>tf2_ros</exec_depend>
   <exec_depend>navbot_drive</exec_depend>
