@@ -264,7 +264,9 @@ class MainWindow(QMainWindow):
         self.model_bar.set_state(state)
         es = state.get("estop", {})
         self.estop.set_state(bool(es.get("latched")), es.get("confirmed"))
-        driving = (state.get("mode") == "manual"
+        # Teleop drives in manual AND mapping (mirror the agent's TELEOP_MODES);
+        # navigate/auto/observe drive themselves.
+        driving = (state.get("mode") in ("manual", "mapping")
                    and state.get("mode_status") == "active"
                    and not es.get("latched"))
         self.teleop.set_enabled(driving)
