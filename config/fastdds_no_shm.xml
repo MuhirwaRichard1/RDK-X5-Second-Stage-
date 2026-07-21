@@ -1,0 +1,82 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+KEPT AS A WARNING — do not point FASTRTPS_DEFAULT_PROFILES_FILE at this file on
+TROS unless you have read all of the below. It is here because working this out
+cost an evening.
+
+The problem it was written for: with the full NAVIGATE graph up, goal_navigator's
+/cmd_vel publishes began failing outright —
+
+    RCLError: Failed to publish: cannot publish data, at ./src/rmw_publish.cpp:62
+
+~21 failures in 24 s. The commands never left the node, so the wheels never
+moved and the robot looked "stuck" while the navigator believed it was driving.
+
+The ACTUAL cause was not the transport: Fast-DDS leaks its /dev/shm
+data-sharing segments whenever a node is SIGKILLed (a launch that ignores
+SIGINT, an agent restart under a running mode). They pile up across mode
+switches — 569 stale segments after one evening of testing — until Fast-DDS
+runs out of segment bookkeeping and refuses to publish. /dev/shm was only 13 MB
+of 2.6 GB used, so it never looks like exhaustion by size. The fix lives in
+app/agent/run_agent.sh: sweep stale segments when nothing is using DDS.
+
+Why disabling shared memory here is the WRONG fix on this platform:
+
+  * TROS ships hobot_shm, which hooks FASTRTPS_DEFAULT_PROFILES_FILE for
+    zero-copy and forces RMW_FASTRTPS_USE_QOS_FROM_XML=1. Setting the variable
+    hands your XML the job of defining ALL writer/reader QoS.
+  * A profile that omits data_writer/data_reader therefore leaves every writer
+    with unusable buffers, and each C++ node aborts on startup:
+        terminate called after throwing an instance of
+        'eprosima::fastcdr::exception::NotEnoughMemoryException'
+        what():  Not enough memory in the buffer stream
+    rclpy nodes survive, so the launch half-dies in a very confusing way —
+    15 nodes dead, agent still happily running.
+  * The namespace must be exactly the one below. With
+    xmlns="http://www.eprosima.com" the file is rejected and every C++
+    participant aborts with SIGABRT, same symptom, different reason.
+
+If you ever do need SHM off, start from hobot's own profile
+(/opt/tros/humble/lib/hobot_shm/config/shm_fastdds.xml) and change only
+<data_sharing> to OFF, keeping its PREALLOCATED_WITH_REALLOC history policy and
+ASYNCHRONOUS publish mode — that is what the writers need to allocate sanely.
+-->
+<profiles xmlns="http://www.eprosima.com/XMLSchemas/fastRTPS_Profiles">
+    <transport_descriptors>
+        <transport_descriptor>
+            <transport_id>udp_only</transport_id>
+            <type>UDPv4</type>
+        </transport_descriptor>
+    </transport_descriptors>
+
+    <participant profile_name="no_shm_participant" is_default_profile="true">
+        <rtps>
+            <userTransports>
+                <transport_id>udp_only</transport_id>
+            </userTransports>
+            <useBuiltinTransports>false</useBuiltinTransports>
+        </rtps>
+    </participant>
+
+    <!-- these two are what the minimal version was missing -->
+    <data_writer profile_name="default publisher profile" is_default_profile="true">
+        <qos>
+            <publishMode>
+                <kind>ASYNCHRONOUS</kind>
+            </publishMode>
+            <data_sharing>
+                <kind>OFF</kind>
+            </data_sharing>
+        </qos>
+        <historyMemoryPolicy>PREALLOCATED_WITH_REALLOC</historyMemoryPolicy>
+    </data_writer>
+
+    <data_reader profile_name="default subscription profile" is_default_profile="true">
+        <qos>
+            <data_sharing>
+                <kind>OFF</kind>
+            </data_sharing>
+        </qos>
+        <historyMemoryPolicy>PREALLOCATED_WITH_REALLOC</historyMemoryPolicy>
+    </data_reader>
+</profiles>
