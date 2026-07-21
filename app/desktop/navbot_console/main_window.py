@@ -5,7 +5,7 @@ health. Bottom: log. Keyboard: WASD/arrows drive (manual mode), Space
 engages the E-stop from anywhere except text fields."""
 
 from PySide6.QtCore import QEvent, QSettings, Qt
-from PySide6.QtWidgets import (QHBoxLayout, QInputDialog, QLabel, QLineEdit,
+from PySide6.QtWidgets import (QDialog, QHBoxLayout, QLabel, QLineEdit,
                                QMainWindow, QPushButton, QScrollArea, QSlider,
                                QSplitter, QVBoxLayout, QWidget)
 
@@ -18,6 +18,7 @@ from .widgets.joystick import JoystickWidget
 from .widgets.log_panel import LogPanel
 from .widgets.main_view import MainView
 from .widgets.map_panel import MapPanel
+from .widgets.map_picker import MapPickerDialog
 from .widgets.mode_bar import ModeBar
 from .widgets.model_bar import ModelBar
 from .widgets.video_panel import VideoPanel
@@ -210,12 +211,12 @@ class MainWindow(QMainWindow):
                                          "MAPPING and SAVE MAP first."})
                 self.mode_bar.set_state(self._state)   # undo the button highlight
                 return
-            name, ok = QInputDialog.getItem(
-                self, "Navigate", "Load which map?", maps, 0, editable=False)
-            if not ok:
+            dlg = MapPickerDialog(maps, self.client.send_delete_map, self)
+            chosen = dlg.selected_map() if dlg.exec() == QDialog.Accepted else None
+            if chosen:
+                self.client.send_mode("navigate", map=chosen)
+            else:
                 self.mode_bar.set_state(self._state)   # cancelled — revert
-                return
-            self.client.send_mode("navigate", map=name)
         else:
             self.client.send_mode(mode)
 

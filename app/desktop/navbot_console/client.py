@@ -148,6 +148,9 @@ class RobotClient(QObject):
             msg["name"] = name
         self.send(msg)
 
+    def send_delete_map(self, name):
+        self.send({"type": "delete_map", "name": name})
+
     def send_goal(self, x, y):
         self.send({"type": "set_goal", "x": float(x), "y": float(y)})
 

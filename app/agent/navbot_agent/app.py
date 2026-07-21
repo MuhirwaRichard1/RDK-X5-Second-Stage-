@@ -4,6 +4,7 @@ periodic telemetry broadcast. All methods run on the asyncio loop thread."""
 
 import asyncio
 import collections
+import glob
 import logging
 import math
 import os
@@ -173,6 +174,23 @@ class AgentApp:
         base = base.replace("/", "_").replace("..", "_") or config.DEFAULT_MAP
         self.add_log("agent", "info", f"saving map -> {base}")
         self.bridge.save_map(base)
+
+    def on_delete_map(self, session, name):
+        """Delete a saved map — every <name>.* artifact (pgm/yaml/posegraph/
+        data) in MAP_DIR. Only maps the agent actually lists can be removed."""
+        name = os.path.basename(str(name or "")).replace("..", "_")
+        if not name or name not in self.list_maps():
+            session.send_json(protocol.error(f"unknown map: {name}"))
+            return
+        removed = 0
+        for p in glob.glob(os.path.join(config.MAP_DIR, glob.escape(name) + ".*")):
+            try:
+                os.remove(p)
+                removed += 1
+            except OSError as e:
+                self.add_log("agent", "error", f"delete map {name}: {e}")
+        self.add_log("agent", "info", f"deleted map {name} ({removed} files)")
+        self.broadcast_state()          # refresh the console's map list
 
     def on_set_goal(self, session, x, y):
         """Publish a navigation goal (map frame) for goal_navigator."""

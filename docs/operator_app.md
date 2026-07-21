@@ -79,6 +79,7 @@ video. First client message must be `hello`.
  "map":"kitchen"}                                    // map: navigate only — saved map to localize against
 {"type":"set_map","enable":true}                     // stream /map PNGs to this session
 {"type":"save_map","name":"kitchen"}                 // save live map as <name> (blank -> "current")
+{"type":"delete_map","name":"kitchen"}               // delete a saved map (all <name>.* files)
 {"type":"set_goal","x":1.2,"y":-0.4}                 // navigate: drive to map-frame point (console map click)
 {"type":"set_model","model":"obstacle_avoidance|yolo11|depthanything","enable":true}
 {"type":"video","cam":"front|left|right","enable":true,

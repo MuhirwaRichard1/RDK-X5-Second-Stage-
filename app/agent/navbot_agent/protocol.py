@@ -38,7 +38,7 @@ UDP_VIDEO_S = struct.Struct(">BBHIBB")
 UDP_CHUNK = 1200            # video fragment payload — fits any sane MTU
 
 CLIENT_TYPES = {"hello", "teleop", "estop", "set_mode", "video", "ping",
-                "set_model", "set_map", "save_map", "set_goal"}
+                "set_model", "set_map", "save_map", "delete_map", "set_goal"}
 
 
 def pack_video(cam_id: int, seq: int, mono_ms: int, jpeg: bytes) -> bytes:
