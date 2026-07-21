@@ -19,12 +19,14 @@ Publishes:
 
 On startup the robot does not know where it is inside the loaded map, so it
 asks AMCL to scatter particles over the whole map
-(/reinitialize_global_localization) and spins in place until the filter
-converges — AMCL only updates on motion, so the spin is what localizes it.
-Goals are ignored until then.
+(/reinitialize_global_localization) and then WANDERS toward open space until
+the filter converges. It has to drive, not spin: the C1 is a 360 deg lidar, so
+turning on the spot returns the same ranges index-shifted and tells the filter
+nothing — only visiting different positions disambiguates. Goals are ignored
+until it has converged.
 
 FSM per tick:
-  not yet localized               -> LOCALIZING, spin in place
+  not yet localized               -> LOCALIZING, wander toward open space
   no goal                         -> IDLE, stop
   recent lift / scan jump         -> RELOCALIZE, rotate slowly to re-localize
   no/old map->base_link TF        -> LOST, stop (also the kidnapped state)
@@ -88,7 +90,8 @@ class GoalNavigator(Node):
         self.declare_parameter("auto_localize", True)
         self.declare_parameter("localize_cov_xy", 0.15)    # m^2, per axis
         self.declare_parameter("localize_cov_yaw", 0.15)   # rad^2
-        self.declare_parameter("localize_timeout_s", 90.0)
+        self.declare_parameter("localize_timeout_s", 120.0)
+        self.declare_parameter("localize_speed", 0.5)      # fraction of v_max
 
         g = lambda n: self.get_parameter(n).value  # noqa: E731
         self.v_max, self.w_max = g("v_max"), g("w_max")
@@ -109,6 +112,7 @@ class GoalNavigator(Node):
         self.cov_xy = g("localize_cov_xy")
         self.cov_yaw = g("localize_cov_yaw")
         self.loc_timeout = g("localize_timeout_s")
+        self.loc_speed = g("localize_speed")
 
         self.goal = None                # (x, y) in map frame
         self.sectors = None
@@ -266,8 +270,8 @@ class GoalNavigator(Node):
 
     def _localize_tick(self, cmd):
         """Find ourselves in the loaded map before accepting goals: ask AMCL to
-        scatter particles map-wide, then rotate in place — the filter only
-        resamples on motion — until the covariance collapses."""
+        scatter particles map-wide, then drive around (see _wander) until the
+        covariance collapses."""
         now = self._now()
         if self._loc_start_t is None:
             self._loc_start_t = now
@@ -308,8 +312,31 @@ class GoalNavigator(Node):
             return
 
         self._set_state("LOCALIZING")
-        cmd.angular.z = self.reloc_wz
+        self._wander(cmd)
         self._drive(cmd)
+
+    def _wander(self, cmd):
+        """Drive toward open space so AMCL's cloud can collapse. Rotating in
+        place cannot do it: the C1 is a 360 deg lidar, so it already sees the
+        whole room from where it stands and a turn returns the same ranges
+        index-shifted — no new information. Only visiting different POSITIONS
+        disambiguates. Same widest-free-run avoidance the AVOID state uses, so
+        this never drives into a blocked sector (safety_gate underneath too)."""
+        if self.sectors is None or self._now() - self.sectors_t > self.obst_stale_s:
+            cmd.angular.z = self.reloc_wz          # no fresh scan -> just turn
+            return
+        run = self._best_run()
+        if run is None:                            # nowhere free -> rotate-search
+            cmd.angular.z = self.search_dir * self.w_max * 0.6
+            return
+        centre, _width = run
+        self.search_dir = 1.0 if centre >= 0 else -1.0
+        steer = float(_clip(self.k * centre, -self.w_max, self.w_max))
+        if abs(centre) <= self.front_cone and self._sector_free(0.0, self.front_cone):
+            cmd.linear.x = self.v_max * self.loc_speed
+            cmd.angular.z = steer
+        else:                                      # turn toward the opening first
+            cmd.angular.z = steer or self.search_dir * 0.5
 
     def _tick(self):
         cmd = Twist()
