@@ -66,10 +66,18 @@ amcl:
     lambda_short: 0.1
     do_beamskip: false
 
-    # no seeded pose: NAVIGATE starts by globally localizing instead. Leaving
-    # always_reset_initial_pose false lets an operator-supplied /initialpose
-    # (or a converged pose) survive rather than being stomped on activation.
-    set_initial_pose: false
+    # NAVIGATE assumes the robot starts at the map origin — park it where
+    # mapping began. Seeding the pose here (rather than globally localizing on
+    # entry) is what lets the operator click a goal the moment the mode is
+    # active, with the robot sitting still. Kidnap recovery still scatters
+    # globally at runtime via /reinitialize_global_localization; leaving
+    # always_reset_initial_pose false keeps that scatter from being stomped.
+    set_initial_pose: true
+    initial_pose:
+      x: 0.0
+      y: 0.0
+      z: 0.0
+      yaw: 0.0
     always_reset_initial_pose: false
 
 map_server:
