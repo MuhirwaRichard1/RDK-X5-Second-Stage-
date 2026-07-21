@@ -13,12 +13,12 @@ This is the agent's "navigate" mode.
         saved map, nav2_amcl publishes map->odom (globally localizable)
     + goal_navigator: /goal + /obstacles + map->base_link -> /cmd_vel
 
-Operator flow: map a room in MAPPING mode, SAVE MAP, park the robot where the
-mapping run began, then switch to NAVIGATE and pick the map. AMCL is seeded at
-the map origin (amcl.yaml set_initial_pose), so the robot sits still and is
-ready at once: click a point on the console map and it drives there, avoiding
-obstacles. Lift and carry it -> it scatters particles, wanders until it finds
-itself again, and resumes the same goal.
+Operator flow: map a room in MAPPING mode, SAVE MAP, then switch to NAVIGATE
+and pick the map. The robot does not know where it is in that map yet, so it
+scatters AMCL's particles over the whole thing and wanders until they collapse
+(state LOCALIZING) — then click a point on the console map and it drives there,
+avoiding obstacles. A click made while it is still localizing is queued. Lift
+and carry it -> it scatters again, re-finds itself, and resumes the same goal.
 
     ros2 launch navbot_bringup autonav.launch.py                    # dry
     ros2 launch navbot_bringup autonav.launch.py motors:=true       # drives!

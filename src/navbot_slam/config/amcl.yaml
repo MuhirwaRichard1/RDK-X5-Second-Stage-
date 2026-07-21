@@ -66,18 +66,14 @@ amcl:
     lambda_short: 0.1
     do_beamskip: false
 
-    # NAVIGATE assumes the robot starts at the map origin — park it where
-    # mapping began. Seeding the pose here (rather than globally localizing on
-    # entry) is what lets the operator click a goal the moment the mode is
-    # active, with the robot sitting still. Kidnap recovery still scatters
-    # globally at runtime via /reinitialize_global_localization; leaving
-    # always_reset_initial_pose false keeps that scatter from being stomped.
-    set_initial_pose: true
-    initial_pose:
-      x: 0.0
-      y: 0.0
-      z: 0.0
-      yaw: 0.0
+    # No seeded pose: seeding at the map origin only works if the robot is
+    # parked exactly where mapping began, and otherwise the map looks right
+    # while every goal lands in the wrong physical spot. goal_navigator instead
+    # scatters particles over the whole map on entry
+    # (/reinitialize_global_localization) and drives until they collapse — see
+    # its auto_localize parameter. Leaving always_reset_initial_pose false lets
+    # a converged pose survive rather than being stomped.
+    set_initial_pose: false
     always_reset_initial_pose: false
 
 map_server:

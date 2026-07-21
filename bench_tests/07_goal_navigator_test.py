@@ -102,7 +102,13 @@ class Harness(Node):
 
 def main():
     rclpy.init()
-    nav = GoalNavigator()
+    # auto_localize off: these scenarios exercise the goal-following FSM, and
+    # there is no amcl on the bench — the node would otherwise sit in
+    # LOCALIZING forever waiting for a particle cloud that never converges.
+    # The kidnap scenario below still works, it wanders without needing amcl.
+    nav = GoalNavigator(parameter_overrides=[
+        rclpy.parameter.Parameter("auto_localize",
+                                  rclpy.parameter.Parameter.Type.BOOL, False)])
     h = Harness()
     ex = MultiThreadedExecutor()
     ex.add_node(nav)

@@ -5,7 +5,8 @@ goal_navigator — drive to a map-frame goal, avoiding obstacles.
 The autonomous counterpart to local_planner: instead of just seeking open
 space, it seeks a GOAL while reusing the same widest-free-run avoidance so it
 never drives forward into a BLOCKED/UNKNOWN sector. Runs in the "navigate"
-mode alongside slam_toolbox localization (which supplies map->base_link).
+mode alongside nav2_amcl localization (which supplies map->odom, and so
+map->base_link on top of icp_odometry).
 
 Subscribes:
   /goal       geometry_msgs/PoseStamped  (map frame — from the console click)
@@ -17,12 +18,14 @@ Publishes:
   /behaviour/state  std_msgs/String
                     (LOCALIZING/IDLE/NAVIGATE/AVOID/ARRIVED/LOST/RELOCALIZE)
 
-NAVIGATE starts ready to drive: amcl.yaml seeds the pose at the map origin
-(park the robot where mapping began), so the operator clicks a point on the
-console map and the robot goes, with no self-driving on mode entry.
+On entering NAVIGATE the robot does not know where it is inside the loaded map,
+so it asks AMCL to scatter particles over the whole map
+(/reinitialize_global_localization) and WANDERS until they collapse onto one
+hypothesis; only then does it accept goals. Clicking before that just queues
+the goal for when it knows where it is.
 
-A kidnap — lift and carry — is the one case where the robot has to find itself
-again. It asks AMCL to scatter particles over the whole map
+A kidnap — lift and carry — is the same problem mid-run, and takes the same
+route: scatter particles over the whole map
 (/reinitialize_global_localization) and then WANDERS toward open space until
 the filter re-converges, before resuming the goal it was already driving to.
 It has to drive, not spin: the C1 is a 360 deg lidar, so turning on the spot
@@ -30,7 +33,7 @@ returns the same ranges index-shifted and tells the filter nothing — only
 visiting different positions disambiguates.
 
 FSM per tick:
-  auto_localize and not yet localized -> LOCALIZING, wander (off by default)
+  not yet localized               -> LOCALIZING, wander (auto_localize, on)
   no goal                         -> IDLE, stop
   lift / scan jump, goal active   -> RELOCALIZE, scatter + wander until found
   no/old map->base_link TF        -> LOST, stop (also the kidnapped state)
@@ -65,8 +68,10 @@ def _wrap(a):
 
 
 class GoalNavigator(Node):
-    def __init__(self):
-        super().__init__("goal_navigator")
+    def __init__(self, **kwargs):
+        # kwargs forwarded to Node so a bench harness can override parameters
+        # (e.g. auto_localize off when there is no amcl to converge against)
+        super().__init__("goal_navigator", **kwargs)
 
         self.declare_parameter("rate_hz", 15.0)
         self.declare_parameter("v_max", 0.22)           # m/s forward
@@ -88,12 +93,12 @@ class GoalNavigator(Node):
         self.declare_parameter("scan_jump_thresh", 0.6)    # m mean-range jump
         self.declare_parameter("relocalize_time_s", 5.0)   # spin-recover window
         self.declare_parameter("relocalize_wz", 0.5)       # rad/s recover spin
-        # Startup global localization is OFF: amcl.yaml seeds the pose at the
-        # map origin instead, so NAVIGATE is immediately ready for a goal click
-        # with the robot standing still. Set true to instead scatter globally
-        # and wander until converged (see _localize_tick) — useful if the robot
-        # cannot be parked where mapping began.
-        self.declare_parameter("auto_localize", False)
+        # Startup global localization: on entering NAVIGATE the robot does not
+        # know where it is, so scatter particles over the whole map and wander
+        # until they collapse (see _localize_tick), THEN accept goals. Seeding
+        # at the map origin instead only holds if the robot is parked exactly
+        # where mapping began — otherwise goals land in the wrong place.
+        self.declare_parameter("auto_localize", True)
         self.declare_parameter("localize_cov_xy", 0.15)    # m^2, per axis
         self.declare_parameter("localize_cov_yaw", 0.15)   # rad^2
         self.declare_parameter("localize_timeout_s", 120.0)
