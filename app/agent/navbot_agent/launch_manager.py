@@ -27,6 +27,7 @@ class LaunchManager:
         self.app = None
         self.proc = None
         self.mode = "stopped"
+        self.map_name = None            # map the live navigate launch loaded
         self._lock = asyncio.Lock()
         self._log_task = None
         self._pidfile = self._pick_pidfile()
@@ -69,19 +70,24 @@ class LaunchManager:
 
     async def set_mode(self, mode, map_name=None):
         async with self._lock:
-            if mode == self.mode and self._alive():
+            # navigate binds its map at launch time (map_file:=), so picking a
+            # different one has to re-launch — only a same-map request is a no-op.
+            want_map = (map_name or config.DEFAULT_MAP) if mode == "navigate" else None
+            if mode == self.mode and self._alive() and want_map == self.map_name:
                 return
             await self._stop_current()
             if mode == "stopped":
                 self.mode = "stopped"
+                self.map_name = None
                 self.app.set_mode_state("stopped", "active")
                 return
-            await self._start(mode, map_name)
+            await self._start(mode, want_map)
 
     async def shutdown(self):
         async with self._lock:
             await self._stop_current()
             self.mode = "stopped"
+            self.map_name = None
 
     def _alive(self):
         return self.proc is not None and self.proc.returncode is None
@@ -94,7 +100,14 @@ class LaunchManager:
         extra = ""
         if mode == "navigate":
             base = map_name or config.DEFAULT_MAP
+            self.map_name = base
             extra = f" map_file:={os.path.join(config.MAP_DIR, base)}"
+            # show the operator the map they picked now — slam_toolbox only
+            # publishes /map once it has loaded the posegraph and relocalized.
+            if self.app.map_pump:
+                self.app.map_pump.preload(base)
+        else:
+            self.map_name = None
         self.app.set_mode_state(mode, "starting", f"launching {launch_file}{extra}")
         cmd = (f"source {config.ROS_SETUP} && source {config.WS_SETUP} && "
                f"exec ros2 launch {config.LAUNCH_PKG} {launch_file} "
@@ -118,6 +131,7 @@ class LaunchManager:
             self.app.set_mode_state(mode, "error", "startup timeout — stopping")
             await self._stop_current()
             self.mode = "stopped"
+            self.map_name = None
             self.app.set_mode_state("stopped", "error",
                                     "mode failed to start (see log)")
 
@@ -189,6 +203,7 @@ class LaunchManager:
                     self.proc = None
                     self.bridge.teleop_enabled = False
                     dead_mode, self.mode = self.mode, "stopped"
+                    self.map_name = None
                     self.app.set_mode_state(
                         "stopped", "error",
                         f"{dead_mode} launch exited unexpectedly (rc={rc})")
