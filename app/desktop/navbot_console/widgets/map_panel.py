@@ -78,8 +78,14 @@ class _MapView(QWidget):
         p.fillRect(self.rect(), QColor(255, 255, 255))
         rect = self.rect()
         if not self._image:
-            p.setPen(QColor(120, 120, 120))
-            p.drawText(rect, Qt.AlignCenter, "map\n(no map)")
+            p.setPen(QColor(110, 110, 110))
+            f = QFont()
+            f.setPointSize(13)
+            f.setBold(True)
+            p.setFont(f)
+            p.drawText(rect, Qt.AlignCenter,
+                       "No map yet\n\nStart MAPPING (or NAVIGATE) mode on the\n"
+                       "robot — the map appears here as it builds.")
             self._draw = None
             return
         scaled = self._image.scaled(rect.size(), Qt.KeepAspectRatio,

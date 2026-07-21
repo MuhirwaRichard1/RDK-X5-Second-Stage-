@@ -1,11 +1,13 @@
-"""ModeBar — the four drive modes as exclusive buttons + a motors lamp.
-Buttons disable during starting/stopping so transitions can't stack."""
+"""ModeBar — the drive modes as exclusive buttons + a motors lamp. Laid out
+in a wrapping grid so all six fit (and stay readable) in the narrow control
+column. Buttons disable during starting/stopping so transitions can't stack."""
 
 from PySide6.QtCore import Signal
-from PySide6.QtWidgets import (QButtonGroup, QHBoxLayout, QLabel,
-                               QPushButton, QVBoxLayout, QWidget)
+from PySide6.QtWidgets import (QButtonGroup, QGridLayout, QHBoxLayout, QLabel,
+                               QPushButton, QSizePolicy, QVBoxLayout, QWidget)
 
 _MODES = ("stopped", "observe", "manual", "auto", "mapping", "navigate")
+_COLS = 3       # 6 modes -> two rows of three; fits the ~360 px column
 _LAMP = {True: "background:#00c853;color:black;border-radius:9px;padding:4px 10px;font-weight:bold;",
          False: "background:#444;color:#aaa;border-radius:9px;padding:4px 10px;"}
 
@@ -15,17 +17,23 @@ class ModeBar(QWidget):
 
     def __init__(self, parent=None):
         super().__init__(parent)
-        buttons_row = QHBoxLayout()
+        buttons_grid = QGridLayout()
+        buttons_grid.setContentsMargins(0, 0, 0, 0)
+        buttons_grid.setSpacing(4)
         self._group = QButtonGroup(self, exclusive=True)
         self._buttons = {}
-        for m in _MODES:
+        for i, m in enumerate(_MODES):
             b = QPushButton(m.upper())
             b.setCheckable(True)
             b.setMinimumHeight(36)
+            b.setMinimumWidth(0)               # let it shrink to the cell
+            b.setSizePolicy(QSizePolicy.Ignored, QSizePolicy.Fixed)
             b.clicked.connect(lambda _c, mode=m: self.modeRequested.emit(mode))
             self._group.addButton(b)
             self._buttons[m] = b
-            buttons_row.addWidget(b)
+            buttons_grid.addWidget(b, i // _COLS, i % _COLS)
+        for c in range(_COLS):
+            buttons_grid.setColumnStretch(c, 1)   # equal-width columns
         self._buttons["stopped"].setChecked(True)
 
         self._status = QLabel("")
@@ -37,7 +45,7 @@ class ModeBar(QWidget):
 
         lay = QVBoxLayout(self)
         lay.setContentsMargins(0, 0, 0, 0)
-        lay.addLayout(buttons_row)
+        lay.addLayout(buttons_grid)
         lay.addLayout(status_row)
 
     def set_state(self, state: dict):
