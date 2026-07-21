@@ -130,8 +130,11 @@ class RobotClient(QObject):
                 self._udp.writeDatagram(pkt, self._udp_addr, self._udp_port)
         self.send({"type": "estop", "engage": bool(engage)})
 
-    def send_mode(self, mode):
-        self.send({"type": "set_mode", "mode": mode})
+    def send_mode(self, mode, map=None):
+        msg = {"type": "set_mode", "mode": mode}
+        if map:
+            msg["map"] = map          # navigate: which saved map to localize against
+        self.send(msg)
 
     def send_model(self, model, enable):
         self.send({"type": "set_model", "model": model, "enable": bool(enable)})

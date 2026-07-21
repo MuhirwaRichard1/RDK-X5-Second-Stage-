@@ -448,6 +448,10 @@ class _AgentNode(Node):
             ok, path = False, str(e)
         self._alog("info" if ok else "error",
                    f"map {kind} {'saved' if ok else 'FAILED'}: {path}")
+        # the pose-graph is what navigate loads — once it lands, re-broadcast
+        # state so the console's map picker shows the newly saved map.
+        if ok and kind == "posegraph" and self.b.app:
+            self.b._post(self.b.app.broadcast_state)
 
     def _goal_tick(self):
         g = self.b._goal

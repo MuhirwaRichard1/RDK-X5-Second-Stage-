@@ -209,7 +209,8 @@ class WsServer:
         elif t == "estop":
             self.app.on_estop(bool(msg.get("engage", True)))
         elif t == "set_mode":
-            self.app.on_set_mode(str(msg.get("mode", "")), session)
+            self.app.on_set_mode(str(msg.get("mode", "")), session,
+                                 msg.get("map"))
         elif t == "video":
             self.app.on_video(session, msg)
         elif t == "set_model":

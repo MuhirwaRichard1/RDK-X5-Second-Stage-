@@ -67,7 +67,7 @@ class LaunchManager:
 
     # ---------------- transitions ----------------
 
-    async def set_mode(self, mode):
+    async def set_mode(self, mode, map_name=None):
         async with self._lock:
             if mode == self.mode and self._alive():
                 return
@@ -76,7 +76,7 @@ class LaunchManager:
                 self.mode = "stopped"
                 self.app.set_mode_state("stopped", "active")
                 return
-            await self._start(mode)
+            await self._start(mode, map_name)
 
     async def shutdown(self):
         async with self._lock:
@@ -86,14 +86,19 @@ class LaunchManager:
     def _alive(self):
         return self.proc is not None and self.proc.returncode is None
 
-    async def _start(self, mode):
+    async def _start(self, mode, map_name=None):
         launch_file, motors = config.MODES[mode]
         motors = motors and not config.FORCE_MOTORS_OFF
         self.mode = mode
-        self.app.set_mode_state(mode, "starting", f"launching {launch_file}")
+        # navigate localizes against a saved map -> pass map_file to autonav.
+        extra = ""
+        if mode == "navigate":
+            base = map_name or config.DEFAULT_MAP
+            extra = f" map_file:={os.path.join(config.MAP_DIR, base)}"
+        self.app.set_mode_state(mode, "starting", f"launching {launch_file}{extra}")
         cmd = (f"source {config.ROS_SETUP} && source {config.WS_SETUP} && "
                f"exec ros2 launch {config.LAUNCH_PKG} {launch_file} "
-               f"motors:={'true' if motors else 'false'}")
+               f"motors:={'true' if motors else 'false'}{extra}")
         self.proc = await asyncio.create_subprocess_exec(
             "bash", "-c", cmd,
             stdout=asyncio.subprocess.PIPE,

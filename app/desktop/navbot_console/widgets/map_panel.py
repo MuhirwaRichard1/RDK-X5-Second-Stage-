@@ -13,10 +13,11 @@ map, and emitted as goalPicked. The chosen goal is drawn as a green cross that
 tracks the map as it pans/grows."""
 
 import base64
+from datetime import datetime
 
 from PySide6.QtCore import QObject, QRect, Qt, Signal
 from PySide6.QtGui import QColor, QFont, QImage, QPainter, QPen
-from PySide6.QtWidgets import QPushButton, QSizePolicy, QWidget
+from PySide6.QtWidgets import (QInputDialog, QPushButton, QSizePolicy, QWidget)
 
 _STYLE_ON = "background:#00c853;color:black;font-weight:bold;"
 _STYLE_OFF = ""
@@ -135,7 +136,7 @@ class _MapView(QWidget):
 
 class MapPanel(QObject):
     mapToggled = Signal(bool)
-    saveRequested = Signal()
+    saveRequested = Signal(str)             # map name to save under
     goalPicked = Signal(float, float)       # map-frame (x, y)
 
     def __init__(self, parent=None):
@@ -144,10 +145,11 @@ class MapPanel(QObject):
         self.toggle.setCheckable(True)
         self.toggle.setMinimumHeight(32)
         self.toggle.clicked.connect(self._on_click)
-        # Save the live SLAM map (needs a mapping mode running on the robot).
+        # Save the live SLAM map under a name (needs a mapping mode running).
+        # Naming lets the operator keep several maps and pick one in NAVIGATE.
         self.save_btn = QPushButton("SAVE MAP")
         self.save_btn.setMinimumHeight(28)
-        self.save_btn.clicked.connect(lambda: self.saveRequested.emit())
+        self.save_btn.clicked.connect(self._on_save_click)
         self.view = _MapView()
         self.view.clicked.connect(self._on_view_click)
         self._meta = None                   # (resolution, origin_x, origin_y)
@@ -178,6 +180,15 @@ class MapPanel(QObject):
         changes — a frozen map must still flag POSE LOST promptly."""
         odom = t.get("odom") or {}
         self.view.set_loc(odom.get("source"), odom.get("pose_age_ms"))
+
+    def _on_save_click(self):
+        """Prompt for a map name so several maps can be kept and later chosen
+        in NAVIGATE. Default is a timestamp; a name is required to save."""
+        default = datetime.now().strftime("map_%m%d_%H%M")
+        name, ok = QInputDialog.getText(
+            self.view, "Save Map", "Save current map as:", text=default)
+        if ok and name.strip():
+            self.saveRequested.emit(name.strip())
 
     def _on_view_click(self, col, row):
         """Image-pixel click -> map-frame (x, y). The PNG is flipped so

@@ -5,9 +5,9 @@ health. Bottom: log. Keyboard: WASD/arrows drive (manual mode), Space
 engages the E-stop from anywhere except text fields."""
 
 from PySide6.QtCore import QEvent, QSettings, Qt
-from PySide6.QtWidgets import (QHBoxLayout, QLabel, QLineEdit, QMainWindow,
-                               QPushButton, QScrollArea, QSlider, QSplitter,
-                               QVBoxLayout, QWidget)
+from PySide6.QtWidgets import (QHBoxLayout, QInputDialog, QLabel, QLineEdit,
+                               QMainWindow, QPushButton, QScrollArea, QSlider,
+                               QSplitter, QVBoxLayout, QWidget)
 
 from .client import RobotClient
 from .teleop import TeleopController
@@ -152,10 +152,10 @@ class MainWindow(QMainWindow):
         self.client.staleChanged.connect(self._on_stale)
         self.video.cameraToggled.connect(
             lambda cam, on: self.client.send_video(cam, on))
-        self.mode_bar.modeRequested.connect(self.client.send_mode)
+        self.mode_bar.modeRequested.connect(self._on_mode_requested)
         self.model_bar.modelToggled.connect(self._on_model_toggled)
         self.map_panel.mapToggled.connect(self._on_map_toggled)
-        self.map_panel.saveRequested.connect(lambda: self.client.send_save_map())
+        self.map_panel.saveRequested.connect(self.client.send_save_map)
         self.map_panel.goalPicked.connect(self.client.send_goal)
         self.estop.estopRequested.connect(self.client.send_estop)
         self.joystick.moved.connect(self.teleop.joystick)
@@ -198,6 +198,26 @@ class MainWindow(QMainWindow):
             self._activate_btn.setEnabled(True)
             self._activate_btn.setText("Activate Robot")
             self._activate_btn.setStyleSheet(_ACTIVATE_STYLE["idle"])
+
+    def _on_mode_requested(self, mode):
+        """NAVIGATE localizes against a saved map — pop a picker so the
+        operator chooses which one. Other modes start directly."""
+        if mode == "navigate":
+            maps = self._state.get("maps") or []
+            if not maps:
+                self.log.on_log({"src": "console", "level": "warn",
+                                 "line": "No saved maps yet — map a room in "
+                                         "MAPPING and SAVE MAP first."})
+                self.mode_bar.set_state(self._state)   # undo the button highlight
+                return
+            name, ok = QInputDialog.getItem(
+                self, "Navigate", "Load which map?", maps, 0, editable=False)
+            if not ok:
+                self.mode_bar.set_state(self._state)   # cancelled — revert
+                return
+            self.client.send_mode("navigate", map=name)
+        else:
+            self.client.send_mode(mode)
 
     def _on_model_toggled(self, model, enabled):
         self.client.send_model(model, enabled)

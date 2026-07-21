@@ -6,6 +6,7 @@ import asyncio
 import collections
 import logging
 import math
+import os
 import time
 
 from . import __version__, config, protocol
@@ -44,7 +45,18 @@ class AgentApp:
                       "confirmed": self.bridge.estop_confirmed if self.bridge else None},
             "detail": self.mode_detail,
             "models": dict(self.active_models),
+            "maps": self.list_maps(),
         }
+
+    def list_maps(self):
+        """Saved maps the operator can navigate against — basenames of the
+        loadable pose-graphs in MAP_DIR (SAVE MAP writes <name>.posegraph)."""
+        try:
+            return sorted(f[:-len(".posegraph")]
+                          for f in os.listdir(config.MAP_DIR)
+                          if f.endswith(".posegraph"))
+        except OSError:
+            return []
 
     def make_welcome(self, session=None):
         msg = protocol.welcome(
@@ -101,14 +113,26 @@ class AgentApp:
         if changed:
             self.broadcast_state()
 
-    def on_set_mode(self, mode, session):
+    def on_set_mode(self, mode, session, map_name=None):
         if mode not in config.MODES:
             session.send_json(protocol.error(f"unknown mode: {mode}"))
             return
         if not self.launch_mgr:
             session.send_json(protocol.error("mode control unavailable (--no-ros)"))
             return
-        asyncio.get_running_loop().create_task(self.launch_mgr.set_mode(mode))
+        # navigate localizes against a saved map; the operator picks which one.
+        if mode == "navigate":
+            if map_name:
+                map_name = os.path.basename(str(map_name)).replace("..", "_")
+                if map_name not in self.list_maps() and map_name != config.DEFAULT_MAP:
+                    session.send_json(protocol.error(f"unknown map: {map_name}"))
+                    return
+            else:
+                map_name = config.DEFAULT_MAP
+        else:
+            map_name = None
+        asyncio.get_running_loop().create_task(
+            self.launch_mgr.set_mode(mode, map_name))
 
     def on_set_model(self, model, enable, session):
         if model not in config.MODELS:

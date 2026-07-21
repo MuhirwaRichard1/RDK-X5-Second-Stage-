@@ -75,7 +75,12 @@ video. First client message must be `hello`.
 {"v":1,"type":"hello","client":"navbot-console/0.1"}
 {"type":"teleop","vx":0.22,"wz":-0.4,"seq":123}     // m/s, rad/s; agent clamps to limits
 {"type":"estop","engage":true}                       // operator latch on/off
-{"type":"set_mode","mode":"stopped|observe|manual|auto"}
+{"type":"set_mode","mode":"stopped|observe|manual|auto|mapping|navigate",
+ "map":"kitchen"}                                    // map: navigate only — saved map to localize against
+{"type":"set_map","enable":true}                     // stream /map PNGs to this session
+{"type":"save_map","name":"kitchen"}                 // save live map as <name> (blank -> "current")
+{"type":"set_goal","x":1.2,"y":-0.4}                 // navigate: drive to map-frame point (console map click)
+{"type":"set_model","model":"obstacle_avoidance|yolo11|depthanything","enable":true}
 {"type":"video","cam":"front|left|right","enable":true,
  "fps":15,"quality":"sd|hd"}                         // sd=640x360 q70; hd=native 720p JPEG
 {"type":"ping","t":123.456}                          // client monotonic; echoed
@@ -89,7 +94,8 @@ video. First client message must be `hello`.
  "udp":{"port":8080,"token":"9f3a…"},                // UDP fast path offer (v1.1)
  "state":{...}}                                      // + last 200 log lines replayed
 {"type":"state","mode":"manual","mode_status":"starting|active|stopping|error",
- "motors":true,"estop":{"latched":true,"confirmed":true},"detail":"..."}
+ "motors":true,"estop":{"latched":true,"confirmed":true},"detail":"...",
+ "models":{...},"maps":["arena","kitchen"]}          // maps: saved maps for the NAVIGATE picker
 {"type":"telemetry", ...}                            // 2 Hz: rates{topic:Hz},
     // range_cm (null = unreadable/stale), teleop_age_ms, cpu, mem,
     // temp_cpu_c, temp_ddr_c, bpu_pct, wifi_dbm,
