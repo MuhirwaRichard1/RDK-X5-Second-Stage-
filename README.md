@@ -1,6 +1,6 @@
 # RDK X5 Tri-Cam NavBot 🤖
 
-> Indoor robot that **maps, navigates to a clicked goal, and recovers from being kidnapped** —
+> Indoor robot that **maps, and navigates to a clicked goal** —
 > with **no wheel encoders** — on the D-Robotics **RDK X5**.
 > Odometry is measured against the world by **laser scan-matching**; the BPU runs
 > **Depth Anything V2 + YOLO11m** concurrently for depth and semantic overlays.
@@ -23,6 +23,10 @@
 | **Stage 3 demo** | https://youtu.be/Z3CnLehWs7o |
 | Extended demo — operator console POV | https://youtu.be/6Rp8K-f7oq8 |
 | Live AI inference on the BPU | https://youtu.be/p5Sa7evwUvI |
+
+## Assembling the Robot
+
+[![Watch The Playlist Here](https://youtube.com)](https://www.youtube.com/playlist?list=PLevwq7hg89PU)
 
 ---
 
